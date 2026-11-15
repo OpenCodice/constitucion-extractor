@@ -92,14 +92,44 @@ if [ "$cobertura_ok" -eq 0 ] && [ "$fiel" = "true" ] && [ -z "$motivo_descarte" 
   ok=true
 fi
 
-python - "$TRABAJO" "$REPORTE" "$ok" "$reparado" "$motivo_descarte" <<'PY'
-import json, pathlib, sys
-trabajo, reporte, ok, reparado, descarte = sys.argv[1:6]
+python - "$TRABAJO" "$REPORTE" "$ok" "$reparado" "$motivo_descarte" "$OUT" "$PERFIL" <<'PY'
+import json, os, pathlib, subprocess, sys
+trabajo, reporte, ok, reparado, descarte, out_dir, perfil = sys.argv[1:8]
 t = pathlib.Path(trabajo)
 try:
     v = json.loads((t / "veredicto.json").read_text(encoding="utf-8"))
 except Exception:
     v = None
+# Asunto del commit de datos: distingue reforma real de corrección de extracción.
+cambiadas = sorted({pathlib.Path(l[3:].strip()).stem for l in subprocess.run(
+    ["git", "-C", out_dir, "status", "--porcelain", "--no-renames", "--", "articulos"],
+    capture_output=True, text=True).stdout.splitlines() if l.strip().endswith(".md")})
+reformadas = sorted(set(map(str, (v or {}).get("reformadas", []))) & set(cambiadas))
+correcciones = [c for c in cambiadas if c not in reformadas]
+nombre = "CPEUM" if perfil == "cpeum" else perfil
+try:
+    version = json.loads(pathlib.Path(out_dir, "metadata", "articulos.json")
+                         .read_text(encoding="utf-8")).get("version")
+except Exception:
+    version = None
+
+
+def arts(claves):
+    if len(claves) > 12:
+        return f"{len(claves)} artículos"
+    return "arts. " + ", ".join(c.lstrip("0") or "0" for c in claves)
+
+
+if reformadas:
+    fecha = f" ({'DOF ' if perfil == 'cpeum' else ''}{version})" if version else ""
+    asunto = f"Reforma {nombre}{fecha}: {arts(reformadas)}"
+    if correcciones:
+        asunto += f" (+{len(correcciones)} correcciones de extracción)"
+    tipo = "reforma"
+else:
+    asunto = f"Corrección de extracción {nombre}: {arts(correcciones)}"
+    tipo = "correccion"
+
 icono = {"fiel": "✅", "artefacto": "❌", "incierto": "❔"}
 out = ["### 🤖 Verificación del agente contra el PDF", ""]
 if ok == "true":
@@ -118,6 +148,11 @@ else:
 if descarte:
     out += ["", f"⚠️ Se descartó un arreglo del agente: {descarte}."]
 out += ["", (t / "cobertura-final.md").read_text(encoding="utf-8")]
+if ok == "true":
+    out += ["", f"<!-- asunto: {asunto} -->"]
+if os.environ.get("GITHUB_OUTPUT"):
+    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+        fh.write(f"tipo={tipo}\n")
 pathlib.Path(reporte).write_text("\n".join(out) + "\n", encoding="utf-8")
 print("\n".join(out))
 PY
