@@ -102,7 +102,7 @@ def write_metadata(
     # Coordenadas en el PDF (página + rects de resaltado), best-effort.
     if pdf_path:
         from .locate import annotate
-        annotate(pasajes, pdf_path)
+        annotate(pasajes, pdf_path, perfil.ruido_res)
     with (meta_dir / "pasajes.jsonl").open("w", encoding="utf-8") as fh:
         for p in pasajes:
             fh.write(json.dumps(p, ensure_ascii=False) + "\n")

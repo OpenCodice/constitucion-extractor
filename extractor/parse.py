@@ -74,6 +74,8 @@ def _strip_headers(page_text: str, perfil: PerfilFuente) -> str:
             continue
         if perfil.page_footer_re and perfil.page_footer_re.match(s):
             continue
+        if any(r.match(s) for r in perfil.ruido_res):
+            continue
         lines.append(line)
     return "\n".join(lines)
 

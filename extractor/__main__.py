@@ -3,6 +3,7 @@
 Uso:
     python -m extractor build --pdf CPEUM.pdf --out ../constitucion-mexicana
     python -m extractor stats --pdf CPEUM.pdf
+    python -m extractor verificar --pdf CPEUM.pdf --out ../constitucion-mexicana --reparar
 """
 from __future__ import annotations
 
@@ -66,6 +67,20 @@ def main(argv: list[str] | None = None) -> int:
                    help="Máximo de artículos que puede tocar una reforma legítima")
     _add_perfil(v)
 
+    vf = sub.add_parser("verificar",
+                        help="Verifica con LLM los artículos cambiados contra el PDF. "
+                             "Sale !=0 si quedan cambios que no son reforma")
+    vf.add_argument("--pdf", default="CPEUM.pdf")
+    vf.add_argument("--out", required=True, help="Ruta al repo de datos (ya regenerado)")
+    vf.add_argument("--reparar", action="store_true",
+                    help="Aprender ruido de página, regenerar y reverificar")
+    vf.add_argument("--modelo", default=None,
+                    help="Modelo (default: $VERIFICADOR_MODELO o el del módulo)")
+    vf.add_argument("--reporte", default=None, help="Escribe el reporte markdown aquí")
+    vf.add_argument("--version", default=None)
+    vf.add_argument("--url-fuente", default=None)
+    _add_perfil(vf)
+
     s = sub.add_parser("stats", help="Imprime estadísticas del parseo (no escribe)")
     s.add_argument("--pdf", default="CPEUM.pdf")
     _add_perfil(s)
@@ -81,8 +96,28 @@ def main(argv: list[str] | None = None) -> int:
         print("\n" + ("✅ Invariantes OK" if ok else "❌ Invariantes ROTOS — no mergear"))
         return 0 if ok else 1
 
+    if args.cmd == "verificar":
+        from .verificar import (con_ruido, modelo_configurado, openai_call,
+                                reporte_md, verificar)
+        perfil = con_ruido(perfil_por_nombre(args.perfil), args.out)
+        modelo = args.modelo or modelo_configurado()
+
+        def rebuild(p):
+            build(args.pdf, args.out, perfil=p, version=args.version,
+                  url_fuente=args.url_fuente)
+
+        r = verificar(args.pdf, args.out, perfil, openai_call(modelo),
+                      reparar=args.reparar, rebuild=rebuild)
+        md = reporte_md(r)
+        if args.reporte:
+            with open(args.reporte, "w", encoding="utf-8") as fh:
+                fh.write(md)
+        print(md)
+        return 0 if r.ok else 2
+
     if args.cmd == "build":
-        perfil = perfil_por_nombre(args.perfil)
+        from .verificar import con_ruido
+        perfil = con_ruido(perfil_por_nombre(args.perfil), args.out)
         arts = build(args.pdf, args.out, what=args.only, perfil=perfil,
                      version=args.version, url_fuente=args.url_fuente)
         if args.only == "metadata":
@@ -92,7 +127,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "index":
-        perfil = perfil_por_nombre(args.perfil)
+        from .verificar import con_ruido
+        perfil = con_ruido(perfil_por_nombre(args.perfil), args.out)
         arts = build(args.pdf, args.out, what="metadata", perfil=perfil,
                      version=args.version, url_fuente=args.url_fuente)
         print(f"✓ metadata regenerada para {len(arts)} artículos (sin tocar los .md)")
@@ -100,7 +136,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "enriquecer":
         from .enrich import DEFAULT_MODELS, caller_for, run_enrichment
-        perfil = perfil_por_nombre(args.perfil)
+        from .verificar import con_ruido
+        perfil = con_ruido(perfil_por_nombre(args.perfil), args.out)
         modelo = args.modelo or DEFAULT_MODELS[args.proveedor]
         arts = parse(args.pdf, perfil=perfil)
         call = caller_for(args.proveedor, modelo)

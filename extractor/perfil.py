@@ -108,6 +108,8 @@ class PerfilFuente:
     n_articulos: Optional[int] = None       # cuenta esperada (None = no exigir)
     leak_markers: tuple[str, ...] = ()      # marcas de fuga de encabezado/pie
     leak_re: Optional[re.Pattern] = None    # fuga del pie "N de TOTAL" en el cuerpo
+    # Mobiliario de página aprendido por `verificar` (fuente/ruido.json).
+    ruido_res: tuple[re.Pattern, ...] = ()
 
     # --- hooks opcionales (Nivel 2) ---------------------------------------
     preprocess: Optional[Callable[[str], str]] = None

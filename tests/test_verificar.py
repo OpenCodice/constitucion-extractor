@@ -1,0 +1,69 @@
+"""Pruebas del verificador (sin LLM real ni PDF)."""
+import json
+import re
+
+from extractor.perfil import CPEUM
+from extractor.verificar import (Cambio, _norm, paginas_de, patrones_de_ruido,
+                                 verificar_cambio)
+
+PARRAFO = "Quien ejerza el cargo no podrá adquirir ni solicitar otra nacionalidad."
+
+
+PALABRAS = "uno dos tres cuatro cinco seis siete ocho nueve diez".split()
+
+
+def _paginas(n=10):
+    return [f"ENCABEZADO DEL CONGRESO\nArtículo de relleno.\nTexto legal {PALABRAS[i]} con contenido.\n"
+            f"Más texto {PALABRAS[i]}.\nPárrafo reformado DOF 0{i % 3 + 1}-06-2011\n{i + 1} de {n}"
+            for i in range(n)]
+
+
+def test_ruido_acepta_pie_y_encabezado_repetidos():
+    pats = patrones_de_ruido(["3 de 10", "ENCABEZADO DEL CONGRESO"], _paginas())
+    assert pats == [r"^ENCABEZADO\s+DEL\s+CONGRESO$", r"^\d+\s+de\s+\d+$"]
+    assert re.match(pats[1], "412 de 416")
+
+
+def test_ruido_rechaza_texto_legal():
+    paginas = _paginas()
+    assert patrones_de_ruido(["Texto legal cuatro con contenido."], paginas) == []
+    assert patrones_de_ruido(["línea que no existe en el PDF"], paginas) == []
+
+
+def test_ruido_rechaza_linea_repetida_fuera_del_borde():
+    paginas = [f"ENCABEZADO\nuno\nDerogado.\ndos\ntres\n{i} de 9" for i in range(9)]
+    assert patrones_de_ruido(["Derogado."], paginas) == []
+
+
+def test_bloques_solo_reporta_lo_que_cambio():
+    c = Cambio("082", "A\n\nB\n\nC", "A\n\nB2\n\nC\n\nD")
+    assert c.bloques() == (["B"], ["B2", "D"])
+
+
+def test_paginas_se_anclan_al_articulo_cuando_el_parrafo_se_repite():
+    normas = [_norm(t) for t in (
+        f"Artículo 82. Para ser Presidente se requiere algo. {PARRAFO}",
+        "Artículo 100. Texto sin relación con lo anterior en absoluto.",
+        f"Artículo 116. Sólo podrá ser gobernador constitucional. {PARRAFO}",
+    )]
+    articulo = ["Sólo podrá ser gobernador constitucional.", PARRAFO]
+    assert paginas_de([PARRAFO], articulo, normas) == [2]
+
+
+def _cambio():
+    return Cambio("116", "Texto anterior del artículo.", "Texto nuevo del artículo reformado.")
+
+
+def test_veredicto_valido_se_respeta():
+    resp = json.dumps({"veredicto": "artefacto", "explicacion": "pie colado",
+                       "problemas": [{"tipo": "ruido_pagina", "fragmento": "8 de 416"}],
+                       "lineas_ruido": ["8 de 416"]})
+    v = verificar_cambio(_cambio(), ["x"], ["x"], lambda _: resp, CPEUM)
+    assert (v.veredicto, v.lineas_ruido) == ("artefacto", ["8 de 416"])
+
+
+def test_respuesta_invalida_es_incierto():
+    v = verificar_cambio(_cambio(), ["x"], ["x"], lambda _: "no es json", CPEUM)
+    assert v.veredicto == "incierto"
+    v = verificar_cambio(_cambio(), ["x"], ["x"], lambda _: '{"veredicto": "quizá"}', CPEUM)
+    assert v.veredicto == "incierto"
