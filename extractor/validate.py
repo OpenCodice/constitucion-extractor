@@ -97,7 +97,8 @@ def validate(data_repo: str, base: str | None = None,
     chk(not truncados, "ningún artículo vacío/truncado", ", ".join(truncados[:5]))
 
     fugas = [n for n, t in cuerpos.items()
-             if any(m in t for m in perfil.leak_markers)]
+             if any(m in t for m in perfil.leak_markers)
+             or (perfil.leak_re and perfil.leak_re.search(t))]
     chk(not fugas, "sin fugas de encabezado/pie de página", ", ".join(fugas[:5]))
 
     pasajes = sum(1 for l in (repo / "metadata" / "pasajes.jsonl")

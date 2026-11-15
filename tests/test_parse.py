@@ -9,6 +9,7 @@ import pytest
 
 from extractor.normalize import normalize_body
 from extractor.parse import parse
+from extractor.perfil import CPEUM
 
 PDF = Path(__file__).resolve().parent.parent / "CPEUM.pdf"
 
@@ -44,7 +45,7 @@ def test_articulo_136_no_arrastra_transitorios(arts):
 def test_no_quedan_encabezados_ni_pies(arts):
     for a in arts:
         assert "CÁMARA DE DIPUTADOS" not in a.body
-        assert "de 414" not in a.body
+        assert not CPEUM.leak_re.search(a.body)
 
 
 def test_normalizacion_extrae_reformas(arts):

@@ -107,6 +107,7 @@ class PerfilFuente:
     # --- gate de validación (validate.py) ---------------------------------
     n_articulos: Optional[int] = None       # cuenta esperada (None = no exigir)
     leak_markers: tuple[str, ...] = ()      # marcas de fuga de encabezado/pie
+    leak_re: Optional[re.Pattern] = None    # fuga del pie "N de TOTAL" en el cuerpo
 
     # --- hooks opcionales (Nivel 2) ---------------------------------------
     preprocess: Optional[Callable[[str], str]] = None
@@ -159,13 +160,14 @@ CPEUM = PerfilFuente(
     header_prefixes=(
         "CONSTITUCIÓN POLÍTICA", "CÁMARA DE DIPUTADOS",
         "Secretaría General", "Secretaría de Servicios"),
-    page_footer_re=re.compile(r"^\d{1,3}\s+de\s+414$"),
+    page_footer_re=re.compile(r"^\d{1,3}\s+de\s+\d{3}$"),
     fechas_de=fechas_dof,
     reform_note_start_re=re.compile(
         r"^(?:Párrafo|Fracción|Inciso|Apartado|Artículo|Reforma|Adicion|"
         r"Reformad|Recorrid|Denominación|Fe de|Adicionad)\b.*DOF\s+\d{2}-\d{2}-\d{4}"),
     n_articulos=136,
-    leak_markers=("CÁMARA DE DIPUTADOS", "Secretaría de Servicios", " de 414"),
+    leak_markers=("CÁMARA DE DIPUTADOS", "Secretaría de Servicios"),
+    leak_re=re.compile(r"\b\d{1,3} de \d{3}\b"),
 )
 
 
