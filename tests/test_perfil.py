@@ -171,3 +171,17 @@ def test_mencion_de_un_titulo_dentro_del_cuerpo_no_es_encabezado():
                  "ARTÍCULO 2. Dos.")
     assert [a.body for a in parse_text(txt, perfil=ESTADO)] == [
         "ARTÍCULO 1. Uno.", "ARTÍCULO 2. Dos."]
+
+
+def test_estatal_variante_bis_minuscula_tras_encabezado_de_capitulo():
+    """'Artículo 107 bis.-' (bis en minúscula) tras un bloque Capítulo +
+    denominación abre su propio artículo; no se pierde ni se pega al anterior."""
+    txt = _texto("Artículo 107.- Uno.", "Texto del 107.",
+                 "CAPÍTULO V", "DE LA RESPONSABILIDAD PATRIMONIAL",
+                 "DEL ESTADO Y LOS MUNICIPIOS",
+                 "Artículo 107 bis.- Dos.", "Texto del bis.",
+                 "Artículo 108.- Tres.")
+    arts = parse_text(txt, perfil=ESTADO)
+    assert [a.key for a in arts] == ["107", "107-bis", "108"]
+    assert "RESPONSABILIDAD" not in arts[0].body
+    assert "Texto del bis." in arts[1].body

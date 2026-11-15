@@ -207,9 +207,9 @@ def perfil_estatal(
         # cuerpo: con el gate monotónico una cita "artículo 51" saltaría `last`
         # a 51 y descartaría 37 artículos reales. (Lo atrapó el gate de validate.)
         article_re=re.compile(
-            r"^(?:Art[íi]culo|ART[ÍI]CULO)\s+(\d+)\s*[oº°]?\s*(Bis|Ter|BIS|TER)?\.?-?(?:\s|$)"),
+            r"^(?:Art[íi]culo|ART[ÍI]CULO)\s+(\d+)\s*[oº°]?\s*((?i:Bis|Ter))?\.?-?(?:\s|$)"),
         article_strip_re=re.compile(
-            r"^(?:Art[íi]culo|ART[ÍI]CULO)\s+\d+\s*[oº°]?\s*(?:Bis|Ter|BIS|TER)?\.?-?\s*"),
+            r"^(?:Art[íi]culo|ART[ÍI]CULO)\s+\d+\s*[oº°]?\s*(?i:Bis|Ter)?\.?-?\s*"),
         titulo_re=re.compile(
             r"^T[íi]tulo\s+(Primero|Segundo|Tercero|Cuarto|Quinto|Sexto|"
             r"S[ée]ptimo|Octavo|Noveno|D[ée]cimo)\b.*$", re.IGNORECASE),
