@@ -162,7 +162,7 @@ CPEUM = PerfilFuente(
     header_prefixes=(
         "CONSTITUCIÓN POLÍTICA", "CÁMARA DE DIPUTADOS",
         "Secretaría General", "Secretaría de Servicios"),
-    page_footer_re=re.compile(r"^\d{1,3}\s+de\s+\d{3}$"),
+    page_footer_re=re.compile(r"^\d{1,4}\s+de\s+\d{3,4}$"),
     fechas_de=fechas_dof,
     reform_note_start_re=re.compile(
         r"^(?:Párrafo|Fracción|Inciso|Apartado|Artículo|Reforma|Adicion|"

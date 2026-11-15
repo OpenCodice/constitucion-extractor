@@ -11,6 +11,8 @@ articulado termina donde empiezan los "Transitorios". Las notas de reforma
 """
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -64,6 +66,21 @@ class Article:
     @property
     def last_reform(self) -> date | None:
         return max(self.reform_dates) if self.reform_dates else None
+
+
+# Encabezado estructural en su propia línea: "Título Segundo", "Capítulo II",
+# "Sección V", "CAPÍTULO ÚNICO". Solo la línea entera: "Título Cuarto de esta
+# Constitución." es texto de un artículo, no un encabezado.
+_ORDINALES = (r"Primer[oa]|Segund[oa]|Tercer[oa]|Cuart[oa]|Quint[oa]|Sext[oa]|"
+              r"S[ée]ptim[oa]|Octav[oa]|Noven[oa]|D[ée]cim[oa](?:\s+\w+)?|[ÚU]nic[oa]|"
+              r"Preliminar")
+ENCABEZADO_RE = re.compile(
+    r"^(?:T[íi]tulo|Cap[íi]tulo|Secci[óo]n)\s+(?:[IVXLC]+|\d{1,3}|" + _ORDINALES +
+    r")(?:\s+Bis)?\.?$", re.IGNORECASE)
+# Un bloque de encabezado (encabezado + denominación + nota "Denominación ...
+# reformada") es corto: si el siguiente artículo no aparece en estas líneas, la
+# línea no era un encabezado estructural y se trata como antes.
+MAX_LINEAS_ENCABEZADO = 8
 
 
 def _strip_headers(page_text: str, perfil: PerfilFuente) -> str:
@@ -140,9 +157,51 @@ def parse_text(clean_text: str, start: int = 1, *,
             art.reform_dates = perfil.fechas_de(art.body)
             articles.append(art)
 
-    for raw in lines:
+    def acepta(stripped: str) -> bool:
+        """¿Esta línea abre un artículo que el gate aceptaría ahora mismo?"""
+        am = perfil.article_re.match(stripped)
+        if not am:
+            return False
+        num = int(am.group(1))
+        if (num == expected) if perfil.gate == "estricto" else (num > last):
+            return True
+        return current is not None and num == current.number and bool(am.group(2))
+
+    def fin_bloque_encabezado(i: int) -> int | None:
+        """Si en `i` empieza un bloque de encabezado estructural (Título /
+        Capítulo / Sección + su denominación + nota de reforma de la
+        denominación) que desemboca en el siguiente artículo, devuelve el
+        índice de ese artículo. El bloque pertenece a la estructura, no al
+        cuerpo del artículo anterior."""
+        if not ENCABEZADO_RE.match(lines[i].strip()):
+            return None
+        for j in range(i + 1, min(i + 1 + MAX_LINEAS_ENCABEZADO, len(lines))):
+            if acepta(lines[j].strip()):
+                return j
+        return None
+
+    saltar_hasta = 0
+    for i, raw in enumerate(lines):
         line = raw.rstrip()
         stripped = line.strip()
+
+        if i < saltar_hasta:
+            # Dentro de un bloque de encabezado: se registran Título/Capítulo
+            # y se descarta la denominación (no es texto de ningún artículo).
+            if perfil.titulo_re.match(stripped) and ENCABEZADO_RE.match(stripped):
+                cur_titulo = stripped
+            elif perfil.capitulo_re.match(stripped):
+                cur_capitulo = stripped
+            continue
+        if current is not None:
+            fin = fin_bloque_encabezado(i)
+            if fin is not None:
+                saltar_hasta = fin
+                if perfil.titulo_re.match(stripped):
+                    cur_titulo = stripped
+                elif perfil.capitulo_re.match(stripped):
+                    cur_capitulo = stripped
+                continue
 
         tm = perfil.titulo_re.match(stripped)
         if tm and current is None or (tm and stripped == tm.group(0)):

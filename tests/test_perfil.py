@@ -95,3 +95,79 @@ def test_etiqueta_por_estilo_ordinal():
     assert fed.label == "Artículo 1o."
     assert jal.label == "Artículo 1º"
     assert cmx.label == "Artículo 1"
+
+
+# --- pie de página "N de TOTAL": el total cambia con cada edición del PDF ----
+
+def test_pie_cpeum_no_depende_del_total_de_paginas():
+    """El PDF pasó de 414 a 416 páginas y el pie '12 de 416' se colaba a media
+    oración. El pie se reconoce con cualquier total, no con uno fijo."""
+    from extractor.parse import _strip_headers
+    for total in (414, 416, 420, 1003):
+        pagina = _texto(
+            "Artículo 1o. Uno, con una oración que el salto de página parte en",
+            f"12 de {total}",
+            "dos mitades.",
+            "Artículo 2o. Dos.")
+        arts = parse_text(_strip_headers(pagina, CPEUM), perfil=CPEUM)
+        assert [a.number for a in arts] == [1, 2]
+        assert f"de {total}" not in arts[0].body
+        assert "parte en\ndos mitades." in arts[0].body
+    # Una línea de texto legal que solo se parece al pie no se descarta.
+    assert "3 de 5" in _strip_headers("integrado por\n3 de 5\nconsejeros", CPEUM)
+
+
+# --- encabezado estructural: no pertenece al artículo anterior --------------
+
+def test_denominacion_de_titulo_capitulo_seccion_no_se_pega_al_articulo_anterior():
+    """'Capítulo II / De los Mexicanos' quedaba con el 'Capítulo II' fuera pero
+    la denominación pegada al final del artículo anterior; 'Sección I ...'
+    quedaba entera. El bloque completo es estructura, no cuerpo."""
+    txt = _texto(
+        "Artículo 1o. Uno.",
+        "Artículo reformado DOF 10-06-2011",
+        "Capítulo II",
+        "De los Mexicanos",
+        "Artículo 2o. Dos.",
+        "Sección I",
+        "De la Elección e Instalación del Congreso",
+        "Sección adicionada DOF 30-07-1999",
+        "Artículo 3o. Tres.",
+        "Título Cuarto",
+        "De las Responsabilidades de los Servidores Públicos, Particulares",
+        "Vinculados con Faltas Administrativas Graves, y Patrimonial del Estado.",
+        "Denominación del Título reformada DOF 28-12-1982, 27-05-2015",
+        "Artículo 4o. Cuatro.",
+        "Título Quinto",
+        "Capítulo I",
+        "De la Soberanía Nacional",
+        "Artículo 5o. Cinco.")
+    arts = parse_text(txt, perfil=CPEUM)
+    assert [a.body for a in arts] == [
+        "Artículo 1o. Uno.\nArtículo reformado DOF 10-06-2011",
+        "Artículo 2o. Dos.", "Artículo 3o. Tres.", "Artículo 4o. Cuatro.",
+        "Artículo 5o. Cinco."]
+    assert [(a.titulo, a.capitulo) for a in arts][1:] == [
+        ("", "Capítulo II"), ("", "Capítulo II"),
+        ("Título Cuarto", "Capítulo II"), ("Título Quinto", "Capítulo I")]
+    # La nota de la denominación no cuenta como reforma del artículo anterior.
+    assert [d.year for d in arts[2].reform_dates] == []
+
+
+def test_mencion_de_un_titulo_dentro_del_cuerpo_no_es_encabezado():
+    """'Título Cuarto de esta Constitución.' o un 'Capítulo II' suelto sin
+    artículo a continuación no abren bloque: el cuerpo sigue completo."""
+    txt = _texto(
+        "Artículo 1o. Serán responsables en los términos del",
+        "Título Cuarto de esta Constitución.",
+        "Los servidores públicos aplicarán con imparcialidad los recursos.",
+        "Artículo 2o. Dos.")
+    a1 = parse_text(txt, perfil=CPEUM)[0]
+    assert a1.body.endswith(
+        "Título Cuarto de esta Constitución.\n"
+        "Los servidores públicos aplicarán con imparcialidad los recursos.")
+    # Estatal (gate monotónico, MAYÚSCULAS): mismo comportamiento.
+    txt = _texto("ARTÍCULO 1. Uno.", "CAPÍTULO II", "DE LOS PODERES PÚBLICOS",
+                 "ARTÍCULO 2. Dos.")
+    assert [a.body for a in parse_text(txt, perfil=ESTADO)] == [
+        "ARTÍCULO 1. Uno.", "ARTÍCULO 2. Dos."]
