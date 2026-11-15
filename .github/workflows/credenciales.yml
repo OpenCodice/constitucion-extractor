@@ -1,0 +1,79 @@
+name: Comprobar credenciales
+
+# Prueba de verdad las dos credenciales de las que depende la vigilancia, para
+# que un token vencido o sin permisos se note aquí y no meses después en un PR
+# que nunca se abrió. Corre el día 1 de cada mes y a mano.
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: '0 10 1 * *'
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  comprobar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: PR_TOKEN — escritura en los repos del sistema
+        env:
+          GH_TOKEN: ${{ secrets.PR_TOKEN }}
+        run: |
+          [ -n "$GH_TOKEN" ] || { echo "::error::Falta el secret PR_TOKEN"; exit 1; }
+          falla=0
+          for r in constitucion-extractor fiscal-extractor constitucion-mexicana leyes-estatales fiscal-mexicano; do
+            push=$(gh api "repos/OpenCodice/$r" -q .permissions.push 2> /dev/null || echo error)
+            echo "$r: push=$push"
+            [ "$push" = "true" ] || falla=1
+          done
+          exit $falla
+
+      - name: PR_TOKEN — crear rama, archivo de workflow y PR (y deshacerlo)
+        env:
+          GH_TOKEN: ${{ secrets.PR_TOKEN }}
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          rama="prueba-credenciales-$GITHUB_RUN_ID"
+          sha=$(gh api "repos/$repo/git/ref/heads/main" -q .object.sha)
+          gh api -X POST "repos/$repo/git/refs" -f ref="refs/heads/$rama" -f sha="$sha" > /dev/null
+          trap 'gh api -X DELETE "repos/$repo/git/refs/heads/$rama" > /dev/null || true' EXIT
+          contenido=$(printf 'name: prueba\non: workflow_dispatch\njobs:\n  x:\n    runs-on: ubuntu-latest\n    steps:\n      - run: "true"\n' | base64 -w0)
+          gh api -X PUT "repos/$repo/contents/.github/workflows/_prueba-credenciales.yml" \
+            -f message="Prueba de credenciales" -f content="$contenido" -f branch="$rama" > /dev/null
+          pr=$(gh api -X POST "repos/$repo/pulls" -f title="Prueba de credenciales (se cierra sola)" \
+            -f head="$rama" -f base=main -q .number)
+          gh api -X PATCH "repos/$repo/pulls/$pr" -f state=closed > /dev/null
+          echo "Contents, Workflows y Pull requests: OK (PR #$pr creado y cerrado)"
+
+      - name: CLAUDE_CODE_OAUTH_TOKEN — el agente responde
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] || { echo "::error::Falta el secret CLAUDE_CODE_OAUTH_TOKEN"; exit 1; }
+          npm install -g @anthropic-ai/claude-code > /dev/null
+          claude -p "Responde únicamente la palabra: ok" --max-turns 1 | tee /tmp/respuesta.txt
+          grep -qi "ok" /tmp/respuesta.txt
+
+  avisar:
+    needs: comprobar
+    if: failure()
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Abrir o actualizar un issue
+        run: |
+          titulo="🚨 Falló: ${{ github.workflow }}"
+          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          n=$(gh issue list -R "$GITHUB_REPOSITORY" --state open \
+                --search "in:title \"$titulo\"" --json number -q '.[0].number')
+          if [ -n "$n" ]; then
+            gh issue comment "$n" -R "$GITHUB_REPOSITORY" --body "Volvió a fallar: $url"
+          else
+            gh issue create -R "$GITHUB_REPOSITORY" --title "$titulo" \
+              --assignee danielcardeenas \
+              --body "Una credencial de la vigilancia venció o perdió permisos: $url"
+          fi
