@@ -1,8 +1,14 @@
 """Verificación asistida por LLM de una regeneración, con autorreparación.
 
 Tras `build`, compara cada artículo cambiado contra el texto crudo de las
-páginas del PDF donde aparece y clasifica el cambio: reforma real o artefacto
-de extracción (pie de página colado, texto cortado, orden roto...).
+páginas del PDF donde aparece y decide si la extracción es fiel al PDF o trae
+un artefacto (pie de página colado, texto omitido, orden roto...). No juzga si
+el cambio es una reforma de fondo: el repo debe reflejar lo que dice el PDF.
+
+Además corre una comprobación determinista de cobertura (`cobertura`): cada
+párrafo extraído debe estar literal en el PDF y no puede quedar texto sin
+extraer entre párrafos. Si falla, el veredicto es artefacto diga lo que diga
+el LLM.
 
 El LLM nunca redacta texto legal. Solo puede:
   - emitir un veredicto por artículo, y
@@ -18,23 +24,28 @@ import os
 import re
 import subprocess
 import unicodedata
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable
 
+from .parse import extract_clean_text
 from .perfil import PerfilFuente
 
 MODELO_DEFAULT = "gpt-5.4-mini"
+MODELO_FUERTE_DEFAULT = "gpt-5.5"   # segunda opinión de lo que no salga "fiel"
 MAX_ARTICULOS = 60           # artículos verificados por pasada (control de costo)
 MAX_PAGINAS_CONTEXTO = 6     # páginas crudas por artículo en el prompt
 MAX_BLOQUE_CHARS = 1500
+MAX_ARTICULO_CHARS = 12000   # texto completo del artículo en el prompt
+MAX_HUECO = 0                # caracteres del PDF sin extraer tolerados entre párrafos
 MAX_RONDAS = 2               # pasadas de reparar → regenerar → reverificar
 BORDE_LINEAS = 2             # una línea de ruido vive en las N primeras/últimas
 FRACCION_PAGINAS_RUIDO = 0.3
 MIN_PAGINAS_RUIDO = 3
 
 RUIDO_PATH = Path("fuente") / "ruido.json"
-VEREDICTOS = ("reforma", "artefacto", "mixto", "incierto")
+VEREDICTOS = ("fiel", "artefacto", "incierto")
 
 
 # ------------------------------------------------------------------ ruido
@@ -70,6 +81,13 @@ def _mascara(linea: str) -> str:
 def _bordes(pagina: str) -> set[str]:
     lineas = [l for l in (x.strip() for x in pagina.splitlines()) if l]
     return {_mascara(l) for l in lineas[:BORDE_LINEAS] + lineas[-BORDE_LINEAS:]}
+
+
+def _ya_descartada(linea: str, perfil: PerfilFuente) -> bool:
+    s = linea.strip()
+    return bool((perfil.header_prefixes and s.startswith(perfil.header_prefixes))
+                or (perfil.page_footer_re and perfil.page_footer_re.match(s))
+                or any(r.match(s) for r in perfil.ruido_res))
 
 
 def patrones_de_ruido(lineas: list[str], paginas: list[str]) -> list[str]:
@@ -166,25 +184,98 @@ def paginas_de(bloques: list[str], articulo: list[str], normas: list[str]) -> li
     return sorted(set(idx))[:MAX_PAGINAS_CONTEXTO]
 
 
+# ------------------------------------------------------------------ cobertura
+
+# Encabezados estructurales que el parser consume como contexto, no como cuerpo.
+ENCABEZADO_RE = re.compile(
+    r"\b(?:T[íi]tulo\s+[a-záéíóú]+|Cap[íi]tulo\s+(?:[IVXLC]+|[úu]nico)(?:\s+Bis)?)\b",
+    re.IGNORECASE)
+
+
+@dataclass
+class Flujo:
+    """Texto limpio del PDF + su forma normalizada, con índice de vuelta."""
+    texto: str
+    norma: str
+    idx: list[int]
+
+    @classmethod
+    def de(cls, texto: str) -> "Flujo":
+        norma, idx = [], []
+        for i, ch in enumerate(texto):
+            n = _norm(ch)
+            norma.append(n)
+            idx.extend([i] * len(n))
+        return cls(texto, "".join(norma), idx)
+
+    def original(self, a: int, b: int) -> str:
+        return " ".join(self.texto[self.idx[a]:self.idx[b - 1] + 1].split())
+
+
+def cobertura(md: str, flujo: Flujo) -> list[dict]:
+    """Comprobación determinista de un artículo extraído contra el PDF: cada
+    párrafo debe estar literal y en orden, y entre párrafos consecutivos no
+    puede quedar texto del PDF sin extraer."""
+    bloques = [n for b in md.split("\n\n")
+               if b.strip() and not b.startswith("# ") and (n := _norm(b))]
+    unicos = [(len(b), i) for i, b in enumerate(bloques) if flujo.norma.count(b) == 1]
+    if not unicos:
+        # Artículo sin ningún párrafo único (p. ej. "Derogado."): solo literalidad.
+        return [{"tipo": "no_literal", "fragmento": b[:120]}
+                for b in bloques if b not in flujo.norma]
+    k = max(unicos)[1]
+    ini = flujo.norma.find(bloques[k])
+    fin = ini + len(bloques[k])
+    problemas: list[dict] = []
+
+    def hueco(a: int, b: int) -> None:
+        if b - a <= MAX_HUECO:
+            return
+        texto = flujo.original(a, b)
+        if _norm(ENCABEZADO_RE.sub("", texto)):
+            problemas.append({"tipo": "texto_omitido", "fragmento": texto})
+
+    for b in bloques[k + 1:]:
+        p = flujo.norma.find(b, fin)
+        if p == -1:
+            problemas.append({"tipo": "no_literal", "fragmento": b[:120]})
+            continue
+        hueco(fin, p)
+        fin = p + len(b)
+    for b in reversed(bloques[:k]):
+        p = flujo.norma.rfind(b, 0, ini)
+        if p == -1:
+            problemas.append({"tipo": "no_literal", "fragmento": b[:120]})
+            continue
+        hueco(p + len(b), ini)
+        ini = p
+    return problemas
+
+
 # ------------------------------------------------------------------ LLM
 
 PROMPT = """Eres verificador de un sistema que versiona leyes mexicanas en git. \
 Un extractor automático convirtió el PDF oficial a texto y, respecto de la versión \
 anterior, cambió el artículo {clave} de: {nombre}.
 
-Decide si el cambio es una reforma real o un artefacto de extracción, comparando \
-contra el texto crudo de las páginas del PDF (incluye encabezados y pies de página).
+Tu única tarea: decidir si los BLOQUES AÑADIDOS reproducen fielmente lo que dice el \
+PDF. No evalúes si el cambio es una reforma de fondo, editorial o de puntuación: si el \
+PDF lo dice así, es fiel. La ausencia de una nota de reforma no es señal de nada.
 
-Todo bloque añadido es copia literal del PDF una vez descartadas las líneas que el \
-extractor reconoce como encabezado o pie; el extractor no inventa ni reescribe texto. \
-Los encabezados y pies que veas en el texto crudo son normales: solo son un problema \
-si aparecen DENTRO de los bloques añadidos.
+Reglas:
+- Todo bloque añadido es copia literal del PDF una vez descartadas las líneas que el \
+extractor reconoce como encabezado o pie. Los encabezados y pies que veas en el texto \
+crudo son normales: solo son un problema si aparecen DENTRO de los bloques añadidos.
+- Solo se listan los bloques que cambiaron. Los párrafos del artículo que no cambiaron \
+NO aparecen entre los añadidos; consulta el texto completo del artículo antes de decir \
+que falta algo.
+- Las páginas del PDF cubren solo la zona de los bloques cambiados.
+- Diferencias de saltos de línea o de dónde se parte un párrafo no son artefacto si \
+las palabras son las mismas y están en el mismo orden. Erratas del propio PDF tampoco.
 
-Señales de artefacto: numeración de página o encabezados colados dentro del texto \
-("12 de 416", nombre de la institución), frases cortadas, párrafos duplicados o fuera \
-de orden, texto de otro artículo, texto legal del PDF que falta en la extracción.
-Señales de reforma real: el nuevo texto se lee completo y coherente en el PDF y suele \
-ir acompañado de una nota de reforma con fecha reciente.
+Es "artefacto" si dentro de un bloque añadido hay numeración de página o encabezados \
+colados, texto de otro artículo, palabras fuera de orden o duplicadas, o si el PDF \
+tiene, en la zona de un bloque añadido, texto legal que no está en el artículo completo.
 
 BLOQUES ELIMINADOS (versión anterior):
 {eliminados}
@@ -192,17 +283,20 @@ BLOQUES ELIMINADOS (versión anterior):
 BLOQUES AÑADIDOS (extracción nueva):
 {anadidos}
 
+TEXTO COMPLETO DEL ARTÍCULO (extracción nueva):
+{articulo}
+
 TEXTO CRUDO DEL PDF:
 {paginas}
 
 Responde SOLO un objeto JSON:
 {{
-  "veredicto": "reforma" | "artefacto" | "mixto" | "incierto",
+  "veredicto": "fiel" | "artefacto" | "incierto",
   "explicacion": "una o dos frases, en español",
-  "problemas": [{{"tipo": "ruido_pagina" | "texto_faltante" | "texto_cortado" | "duplicado" | "orden" | "otro", "fragmento": "cita literal breve del texto extraído"}}],
+  "problemas": [{{"tipo": "ruido_pagina" | "texto_faltante" | "duplicado" | "orden" | "otro", "fragmento": "cita literal breve"}}],
   "lineas_ruido": ["líneas COMPLETAS del texto crudo del PDF, copiadas literalmente, que son encabezado, pie o numeración de página y no texto legal"]
 }}
-"mixto" = hay reforma real y además artefactos. "incierto" = no puedes decidir con lo dado."""
+"problemas" va vacío si el veredicto es "fiel". "incierto" = no puedes decidir con lo dado."""
 
 
 def openai_call(modelo: str) -> Callable[[str], str]:
@@ -244,9 +338,11 @@ def verificar_cambio(c: Cambio, paginas: list[str], normas: list[str],
     idx = paginas_de(anadidos or eliminados, articulo, normas)
     crudo = "\n\n".join(f"=== PÁGINA {i + 1} ===\n{paginas[i]}" for i in idx) \
         or "(no se localizó el artículo en el PDF)"
+    completo = (c.despues if len(c.despues) <= MAX_ARTICULO_CHARS
+                else "(omitido por extensión; no afirmes que falta texto)")
     prompt = PROMPT.format(clave=c.clave, nombre=perfil.nombre,
                            eliminados=_recorta(eliminados), anadidos=_recorta(anadidos),
-                           paginas=crudo)
+                           articulo=completo or "(artículo eliminado)", paginas=crudo)
     try:
         data = json.loads(call(prompt))
     except Exception as e:
@@ -272,35 +368,56 @@ class Resultado:
 
     @property
     def ok(self) -> bool:
-        return (all(v.veredicto == "reforma" for v in self.veredictos)
+        return (all(v.veredicto == "fiel" for v in self.veredictos)
                 and self.total_cambios <= len(self.veredictos))
 
 
 def verificar(pdf_path: str, out: str | Path, perfil: PerfilFuente,
               call: Callable[[str], str], *, reparar: bool = False,
-              rebuild: Callable[[PerfilFuente], None] | None = None) -> Resultado:
+              rebuild: Callable[[PerfilFuente], None] | None = None,
+              call_fuerte: Callable[[str], str] | None = None) -> Resultado:
     """Verifica los artículos cambiados; con `reparar`, aprende ruido de página,
-    regenera con `rebuild` y vuelve a verificar (hasta MAX_RONDAS)."""
+    regenera con `rebuild` y vuelve a verificar (hasta MAX_RONDAS).
+
+    Lo que `call` no dé por fiel se reevalúa con `call_fuerte` (modelo más
+    capaz), cuyo veredicto es el definitivo."""
     paginas = paginas_crudas(pdf_path)
     normas = [_norm(p) for p in paginas]
+    base = perfil
     aprendidos: list[str] = []
     ronda = 0
     while True:
         ronda += 1
         todos = cambios(out)
-        veredictos = [verificar_cambio(c, paginas, normas, call, perfil)
-                      for c in todos[:MAX_ARTICULOS]]
-        lineas = [l for v in veredictos for l in v.lineas_ruido]
+        flujo = Flujo.de(extract_clean_text(pdf_path, perfil=perfil))
+
+        def evaluar(c: Cambio) -> Veredicto:
+            v = verificar_cambio(c, paginas, normas, call, perfil)
+            if v.veredicto != "fiel" and call_fuerte:
+                v = verificar_cambio(c, paginas, normas, call_fuerte, perfil)
+            duros = cobertura(c.despues, flujo)
+            if duros:
+                v = replace(v, veredicto="artefacto", problemas=duros + v.problemas,
+                            explicacion="El texto extraído no coincide con el PDF "
+                                        "(comprobación determinista). "
+                                        + ("" if v.veredicto == "fiel" else v.explicacion))
+            return v
+
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            veredictos = list(pool.map(evaluar, todos[:MAX_ARTICULOS]))
+        lineas = [l for v in veredictos for l in v.lineas_ruido
+                  if not _ya_descartada(l, perfil)]
         ya = set(p.pattern for p in cargar_ruido(out))
         nuevos = [p for p in patrones_de_ruido(lineas, paginas) if p not in ya]
         if not (reparar and rebuild and nuevos and ronda <= MAX_RONDAS):
             return Resultado(veredictos, len(todos), aprendidos, ronda)
         _guardar_ruido(out, nuevos)
         aprendidos += nuevos
-        rebuild(con_ruido(perfil, out))
+        perfil = con_ruido(base, out)
+        rebuild(perfil)
 
 
-ICONO = {"reforma": "✅", "artefacto": "❌", "mixto": "⚠️", "incierto": "❔"}
+ICONO = {"fiel": "✅", "artefacto": "❌", "incierto": "❔"}
 
 
 def reporte_md(r: Resultado) -> str:
@@ -308,7 +425,7 @@ def reporte_md(r: Resultado) -> str:
     if not r.veredictos:
         lineas.append("Sin artículos cambiados tras la verificación.")
     elif r.ok:
-        lineas.append("Todos los cambios corresponden al texto del PDF oficial.")
+        lineas.append("Todos los cambios reproducen fielmente el PDF oficial.")
     else:
         lineas.append("**Hay cambios que parecen artefactos de extracción — no mergear sin revisar.**")
     if r.patrones_nuevos:
@@ -326,3 +443,7 @@ def reporte_md(r: Resultado) -> str:
 
 def modelo_configurado() -> str:
     return os.environ.get("VERIFICADOR_MODELO") or MODELO_DEFAULT
+
+
+def modelo_fuerte_configurado() -> str:
+    return os.environ.get("VERIFICADOR_MODELO_FUERTE") or MODELO_FUERTE_DEFAULT

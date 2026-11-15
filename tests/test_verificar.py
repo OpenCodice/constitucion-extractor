@@ -3,8 +3,8 @@ import json
 import re
 
 from extractor.perfil import CPEUM
-from extractor.verificar import (Cambio, _norm, paginas_de, patrones_de_ruido,
-                                 verificar_cambio)
+from extractor.verificar import (Cambio, Flujo, _norm, cobertura, paginas_de,
+                                 patrones_de_ruido, verificar_cambio)
 
 PARRAFO = "Quien ejerza el cargo no podrá adquirir ni solicitar otra nacionalidad."
 
@@ -54,6 +54,11 @@ def _cambio():
     return Cambio("116", "Texto anterior del artículo.", "Texto nuevo del artículo reformado.")
 
 
+def test_veredicto_fiel():
+    v = verificar_cambio(_cambio(), ["x"], ["x"], lambda _: '{"veredicto": "fiel"}', CPEUM)
+    assert v.veredicto == "fiel"
+
+
 def test_veredicto_valido_se_respeta():
     resp = json.dumps({"veredicto": "artefacto", "explicacion": "pie colado",
                        "problemas": [{"tipo": "ruido_pagina", "fragmento": "8 de 416"}],
@@ -67,3 +72,41 @@ def test_respuesta_invalida_es_incierto():
     assert v.veredicto == "incierto"
     v = verificar_cambio(_cambio(), ["x"], ["x"], lambda _: '{"veredicto": "quizá"}', CPEUM)
     assert v.veredicto == "incierto"
+
+
+PDF_LIMPIO = """Artículo 5. Primer párrafo del artículo cinco, con texto propio.
+Segundo párrafo, distinto del primero y también único.
+Derogado.
+Capítulo II
+Artículo 6. Otro artículo que no importa aquí.
+Derogado."""
+
+
+def _md(*parrafos):
+    return "# Artículo 5\n\n" + "\n\n".join(parrafos) + "\n"
+
+
+def test_cobertura_acepta_extraccion_completa():
+    f = Flujo.de(PDF_LIMPIO)
+    assert cobertura(_md("Primer párrafo del artículo cinco, con texto propio.",
+                         "Segundo párrafo, distinto del primero y también único.",
+                         "Derogado."), f) == []
+
+
+def test_cobertura_detecta_parrafo_omitido():
+    f = Flujo.de(PDF_LIMPIO)
+    pr = cobertura(_md("Primer párrafo del artículo cinco, con texto propio.", "Derogado."), f)
+    assert [p["tipo"] for p in pr] == ["texto_omitido"]
+    assert "Segundo párrafo" in pr[0]["fragmento"]
+
+
+def test_cobertura_detecta_texto_que_no_esta_en_el_pdf():
+    f = Flujo.de(PDF_LIMPIO)
+    pr = cobertura(_md("Primer párrafo del artículo 12 de 416 cinco, con texto propio.",
+                       "Segundo párrafo, distinto del primero y también único."), f)
+    assert [p["tipo"] for p in pr] == ["no_literal"]
+
+
+def test_cobertura_ignora_encabezados_de_capitulo():
+    f = Flujo.de("Artículo 5. Texto único del quinto.\nCapítulo II\nCierre único del quinto.")
+    assert cobertura(_md("Texto único del quinto.", "Cierre único del quinto."), f) == []

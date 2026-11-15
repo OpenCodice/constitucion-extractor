@@ -97,7 +97,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if ok else 1
 
     if args.cmd == "verificar":
-        from .verificar import (con_ruido, modelo_configurado, openai_call,
+        from .verificar import (con_ruido, modelo_configurado,
+                                modelo_fuerte_configurado, openai_call,
                                 reporte_md, verificar)
         perfil = con_ruido(perfil_por_nombre(args.perfil), args.out)
         modelo = args.modelo or modelo_configurado()
@@ -107,7 +108,8 @@ def main(argv: list[str] | None = None) -> int:
                   url_fuente=args.url_fuente)
 
         r = verificar(args.pdf, args.out, perfil, openai_call(modelo),
-                      reparar=args.reparar, rebuild=rebuild)
+                      reparar=args.reparar, rebuild=rebuild,
+                      call_fuerte=openai_call(modelo_fuerte_configurado()))
         md = reporte_md(r)
         if args.reporte:
             with open(args.reporte, "w", encoding="utf-8") as fh:
