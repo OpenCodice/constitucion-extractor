@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# Compuertas deterministas después del agente. Regenera el repo de datos desde
+# cero (el texto nunca sale del agente), decide si su arreglo al extractor se
+# publica y emite el veredicto final. Sale 0 si todo quedó fiel, 2 si no.
+#
+# Entorno: PDF, OUT, PERFIL; opcionales BUILD_ARGS, AGENTE_DIR, REPORTE,
+# EXTRACTOR_TOKEN + EXTRACTOR_SLUG (para publicar el arreglo), EXTRACTOR_PUSH_URL
+# (destino alterno, para pruebas).
+set -uo pipefail
+
+EXTRACTOR="$(cd "$(dirname "$0")/../.." && pwd)"
+TRABAJO="${AGENTE_DIR:-/tmp/agente}"
+REPORTE="${REPORTE:-/tmp/verificacion.md}"
+cd "$EXTRACTOR"
+export PYTHONPATH="$EXTRACTOR"
+
+if [ ! -s "$TRABAJO/cambiados.txt" ]; then
+  exit 0
+fi
+
+regenerar() {
+  git -C "$OUT" checkout -q -- . && git -C "$OUT" clean -fdq -- .
+  # shellcheck disable=SC2086
+  python -m extractor build --pdf "$PDF" --out "$OUT" --perfil "$PERFIL" ${BUILD_ARGS:-} > /dev/null
+}
+
+descartar() {
+  echo "::warning::Arreglo del agente descartado: $1"
+  motivo_descarte="$1"
+  git diff > "$TRABAJO/arreglo-descartado.patch" || true
+  git checkout -q -- . && git clean -fdq
+}
+
+campo() {
+  python - "$TRABAJO/veredicto.json" "$1" <<'PY'
+import json, sys
+try:
+    v = json.load(open(sys.argv[1], encoding="utf-8")).get(sys.argv[2], "")
+except Exception:
+    v = ""
+print(str(v).lower() if isinstance(v, bool) else v)
+PY
+}
+
+reparado=false
+motivo_descarte=""
+if [ -n "$(git status --porcelain)" ]; then
+  pip install -q pytest > /dev/null 2>&1 || true
+  if ! python -m pytest -q > "$TRABAJO/pytest.log" 2>&1; then
+    descartar "las pruebas no pasan"
+  else
+    regenerar
+    python -m extractor auditar --pdf "$PDF" --out "$OUT" --perfil "$PERFIL" \
+      --json "$TRABAJO/nuevo.json" > /dev/null
+    nuevas=$(python - "$TRABAJO" <<'PY'
+import json, sys
+t = sys.argv[1]
+base = set(json.load(open(f"{t}/base.json"))["con_problemas"])
+nuevo = set(json.load(open(f"{t}/nuevo.json"))["con_problemas"])
+print(" ".join(sorted(nuevo - base)))
+PY
+)
+    if [ -n "$nuevas" ]; then
+      descartar "rompe la cobertura de: $nuevas"
+    elif [ -z "${EXTRACTOR_PUSH_URL:-}" ] && { [ -z "${EXTRACTOR_TOKEN:-}" ] || [ -z "${EXTRACTOR_SLUG:-}" ]; }; then
+      descartar "sin credenciales para publicar el arreglo en el extractor"
+    else
+      titulo="$(campo titulo_commit)"
+      git add -A
+      git -c user.name="${GITHUB_ACTOR:-opencodice-ci}" \
+          -c user.email="${GITHUB_ACTOR_ID:-0}+${GITHUB_ACTOR:-opencodice-ci}@users.noreply.github.com" \
+          commit -q -m "Reparación automática: ${titulo:-ajuste del extractor a un cambio de formato del PDF}"
+      destino="${EXTRACTOR_PUSH_URL:-https://x-access-token:${EXTRACTOR_TOKEN:-}@github.com/${EXTRACTOR_SLUG:-}.git}"
+      if git push -q "$destino" HEAD:main; then
+        reparado=true
+      else
+        git reset -q --hard HEAD~1
+        descartar "no se pudo publicar el arreglo en el extractor"
+      fi
+    fi
+  fi
+fi
+
+regenerar
+python -m extractor verificar --sin-llm --pdf "$PDF" --out "$OUT" --perfil "$PERFIL" \
+  --reporte "$TRABAJO/cobertura-final.md" > /dev/null
+cobertura_ok=$?
+fiel="$(campo fiel)"
+
+ok=false
+if [ "$cobertura_ok" -eq 0 ] && [ "$fiel" = "true" ] && [ -z "$motivo_descarte" ]; then
+  ok=true
+fi
+
+python - "$TRABAJO" "$REPORTE" "$ok" "$reparado" "$motivo_descarte" <<'PY'
+import json, pathlib, sys
+trabajo, reporte, ok, reparado, descarte = sys.argv[1:6]
+t = pathlib.Path(trabajo)
+try:
+    v = json.loads((t / "veredicto.json").read_text(encoding="utf-8"))
+except Exception:
+    v = None
+icono = {"fiel": "✅", "artefacto": "❌", "incierto": "❔"}
+out = ["### 🤖 Verificación del agente contra el PDF", ""]
+if ok == "true":
+    out.append("La extracción quedó verificada: reproduce fielmente el PDF oficial.")
+else:
+    out.append("**La extracción NO quedó verificada — no mergear sin revisar.**")
+if v is None:
+    out += ["", "El agente no entregó veredicto."]
+else:
+    out += ["", str(v.get("resumen", ""))]
+    if reparado == "true":
+        out += ["", f"🔧 El agente reparó el extractor: _{v.get('titulo_commit', '')}_"]
+    out.append("")
+    for u in v.get("unidades", [])[:80]:
+        out.append(f"- {icono.get(u.get('veredicto'), '❔')} **{u.get('clave')}** — {u.get('nota', '')}")
+if descarte:
+    out += ["", f"⚠️ Se descartó un arreglo del agente: {descarte}."]
+out += ["", (t / "cobertura-final.md").read_text(encoding="utf-8")]
+pathlib.Path(reporte).write_text("\n".join(out) + "\n", encoding="utf-8")
+print("\n".join(out))
+PY
+
+[ "$ok" = "true" ] && exit 0 || exit 2

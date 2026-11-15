@@ -373,7 +373,7 @@ class Resultado:
 
 
 def verificar(pdf_path: str, out: str | Path, perfil: PerfilFuente,
-              call: Callable[[str], str], *, reparar: bool = False,
+              call: Callable[[str], str] | None, *, reparar: bool = False,
               rebuild: Callable[[PerfilFuente], None] | None = None,
               call_fuerte: Callable[[str], str] | None = None) -> Resultado:
     """Verifica los artículos cambiados; con `reparar`, aprende ruido de página,
@@ -392,9 +392,12 @@ def verificar(pdf_path: str, out: str | Path, perfil: PerfilFuente,
         flujo = Flujo.de(extract_clean_text(pdf_path, perfil=perfil))
 
         def evaluar(c: Cambio) -> Veredicto:
-            v = verificar_cambio(c, paginas, normas, call, perfil)
-            if v.veredicto != "fiel" and call_fuerte:
-                v = verificar_cambio(c, paginas, normas, call_fuerte, perfil)
+            if call is None:
+                v = Veredicto(c.clave, "fiel", "Cobertura determinista en verde.")
+            else:
+                v = verificar_cambio(c, paginas, normas, call, perfil)
+                if v.veredicto != "fiel" and call_fuerte:
+                    v = verificar_cambio(c, paginas, normas, call_fuerte, perfil)
             duros = cobertura(c.despues, flujo)
             if duros:
                 v = replace(v, veredicto="artefacto", problemas=duros + v.problemas,
@@ -415,6 +418,16 @@ def verificar(pdf_path: str, out: str | Path, perfil: PerfilFuente,
         aprendidos += nuevos
         perfil = con_ruido(base, out)
         rebuild(perfil)
+
+
+def auditar(pdf_path: str, out: str | Path, perfil: PerfilFuente) -> dict:
+    """Cobertura determinista de TODOS los artículos del repo de datos contra
+    el PDF. Sirve de línea base: un cambio al extractor no puede sumar claves."""
+    flujo = Flujo.de(extract_clean_text(pdf_path, perfil=perfil))
+    arts = sorted((Path(out) / "articulos").glob("*.md"))
+    malos = {a.stem: pr for a in arts
+             if (pr := cobertura(a.read_text(encoding="utf-8"), flujo))}
+    return {"total": len(arts), "con_problemas": malos}
 
 
 ICONO = {"fiel": "✅", "artefacto": "❌", "incierto": "❔"}

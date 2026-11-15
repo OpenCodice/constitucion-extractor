@@ -76,10 +76,19 @@ def main(argv: list[str] | None = None) -> int:
                     help="Aprender ruido de página, regenerar y reverificar")
     vf.add_argument("--modelo", default=None,
                     help="Modelo (default: $VERIFICADOR_MODELO o el del módulo)")
+    vf.add_argument("--sin-llm", action="store_true",
+                    help="Solo la cobertura determinista (sin LLM ni autorreparación)")
     vf.add_argument("--reporte", default=None, help="Escribe el reporte markdown aquí")
     vf.add_argument("--version", default=None)
     vf.add_argument("--url-fuente", default=None)
     _add_perfil(vf)
+
+    au = sub.add_parser("auditar",
+                        help="Cobertura determinista de todos los artículos contra el PDF")
+    au.add_argument("--pdf", default="CPEUM.pdf")
+    au.add_argument("--out", required=True, help="Ruta al repo de datos")
+    au.add_argument("--json", default=None, help="Escribe el resultado aquí")
+    _add_perfil(au)
 
     s = sub.add_parser("stats", help="Imprime estadísticas del parseo (no escribe)")
     s.add_argument("--pdf", default="CPEUM.pdf")
@@ -107,15 +116,32 @@ def main(argv: list[str] | None = None) -> int:
             build(args.pdf, args.out, perfil=p, version=args.version,
                   url_fuente=args.url_fuente)
 
-        r = verificar(args.pdf, args.out, perfil, openai_call(modelo),
-                      reparar=args.reparar, rebuild=rebuild,
-                      call_fuerte=openai_call(modelo_fuerte_configurado()))
+        if args.sin_llm:
+            r = verificar(args.pdf, args.out, perfil, None)
+        else:
+            r = verificar(args.pdf, args.out, perfil, openai_call(modelo),
+                          reparar=args.reparar, rebuild=rebuild,
+                          call_fuerte=openai_call(modelo_fuerte_configurado()))
         md = reporte_md(r)
         if args.reporte:
             with open(args.reporte, "w", encoding="utf-8") as fh:
                 fh.write(md)
         print(md)
         return 0 if r.ok else 2
+
+    if args.cmd == "auditar":
+        import json
+        from .verificar import auditar, con_ruido
+        perfil = con_ruido(perfil_por_nombre(args.perfil), args.out)
+        res = auditar(args.pdf, args.out, perfil)
+        if args.json:
+            with open(args.json, "w", encoding="utf-8") as fh:
+                json.dump(res, fh, ensure_ascii=False, indent=2)
+        malos = res["con_problemas"]
+        print(f"{len(malos)} de {res['total']} artículos con problemas de cobertura")
+        for clave, pr in malos.items():
+            print(f"  {clave}: " + "; ".join(f"{p['tipo']} «{p['fragmento'][:80]}»" for p in pr[:3]))
+        return 0
 
     if args.cmd == "build":
         from .verificar import con_ruido
