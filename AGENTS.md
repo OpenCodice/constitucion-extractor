@@ -24,6 +24,9 @@ está mal, se corrige aquí.
   (lo lanza) y `cerrar.sh` (compuertas deterministas, publica su arreglo).
 - `scripts/resolver_pdf.py` — URL vigente del PDF de un estado.
 - `scripts/pr_summary.py` — cuerpo del PR de vigilancia.
+- `.github/workflows/credenciales.yml` — comprobación mensual de `PR_TOKEN` y
+  `CLAUDE_CODE_OAUTH_TOKEN`, las credenciales de organización que usa la
+  vigilancia de todos los repos de datos.
 
 ## Comandos
 
