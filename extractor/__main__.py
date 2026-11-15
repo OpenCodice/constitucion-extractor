@@ -46,18 +46,6 @@ def main(argv: list[str] | None = None) -> int:
                      help="URL del PDF vigente (override; la del perfil puede rotar)")
     _add_perfil(idx)
 
-    e = sub.add_parser("enriquecer",
-                       help="Genera la capa de enriquecimiento por LLM (metadata/generado/)")
-    e.add_argument("--pdf", default="CPEUM.pdf")
-    e.add_argument("--out", required=True)
-    _add_perfil(e)
-    e.add_argument("--proveedor", choices=["anthropic", "openai"], default="openai",
-                   help="Proveedor del LLM (default: openai)")
-    e.add_argument("--modelo", default=None,
-                   help="Modelo a usar (default según proveedor)")
-    e.add_argument("--force", action="store_true",
-                   help="Regenerar todos, ignorando la caché por hash")
-
     v = sub.add_parser("validar",
                        help="Verifica invariantes del repo de datos (gate de CI). Sale !=0 si falla")
     v.add_argument("--out", required=True, help="Ruta al repo de datos")
@@ -160,20 +148,6 @@ def main(argv: list[str] | None = None) -> int:
         arts = build(args.pdf, args.out, what="metadata", perfil=perfil,
                      version=args.version, url_fuente=args.url_fuente)
         print(f"✓ metadata regenerada para {len(arts)} artículos (sin tocar los .md)")
-        return 0
-
-    if args.cmd == "enriquecer":
-        from .enrich import DEFAULT_MODELS, caller_for, run_enrichment
-        from .verificar import con_ruido
-        perfil = con_ruido(perfil_por_nombre(args.perfil), args.out)
-        modelo = args.modelo or DEFAULT_MODELS[args.proveedor]
-        arts = parse(args.pdf, perfil=perfil)
-        call = caller_for(args.proveedor, modelo)
-        stats = run_enrichment(arts, args.out, call, f"{args.proveedor}:{modelo}", force=args.force)
-        print(f"✓ enriquecimiento ({args.proveedor}:{modelo}): {stats['generados']} generados, "
-              f"{stats['omitidos']} omitidos, {stats['fallidos']} fallidos")
-        for err in stats["errores"]:
-            print(f"  ⚠ {err}")
         return 0
 
     if args.cmd == "stats":

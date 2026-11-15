@@ -23,20 +23,6 @@ y git sigue viendo el cambio. Regla de oro: **la capa 3 nunca toca los archivos
 de la capa 1.** Por eso `write_articles` (texto) y `write_metadata` (índice) son
 independientes, y existe `index` para regenerar solo la metadata.
 
-Hay además una **capa GENERADA** (best-effort, no canónica) en
-`metadata/generado/`: enriquecimiento por LLM (temas, términos coloquiales,
-preguntas) para mejorar el *recall* del RAG. Es **solo ayuda de búsqueda, nunca
-fuente de cita**; está cuarentenada, se genera con `extractor enriquecer`
-(`--proveedor openai` por defecto, o `anthropic`) y se regenera por hash solo
-cuando cambia el texto del artículo.
-
-```bash
-# OpenAI (default, más económico) — requiere OPENAI_API_KEY y `pip install openai`
-python -m extractor enriquecer --out ../constitucion-mexicana
-# Anthropic — requiere ANTHROPIC_API_KEY y `pip install anthropic`
-python -m extractor enriquecer --out ../constitucion-mexicana --proveedor anthropic
-```
-
 ## Cómo funciona
 
 ```
@@ -82,20 +68,28 @@ curl -L -o CPEUM.pdf https://www.diputados.gob.mx/LeyesBiblio/pdf/CPEUM.pdf
 
 ## Flujo de actualización (rastro de reformas)
 
-Cuando el DOF publica una reforma, la Cámara actualiza el PDF. Para dejar rastro:
+Está automatizado. Cada lunes, el workflow `vigilar-*` de cada repo de datos
+descarga el PDF vigente, lo regenera con este extractor y, si cambió texto,
+lanza un agente (Claude Code, `scripts/agente/`) que compara cada artículo
+cambiado contra el PDF. Si la extracción tiene un defecto, el agente corrige el
+parser aquí mismo y agrega una prueba; unas compuertas deterministas deciden si
+ese arreglo se publica. El PR verificado se fusiona solo en el repo de datos.
+
+Las mismas comprobaciones se pueden correr a mano:
 
 ```bash
-curl -L -o CPEUM.pdf https://www.diputados.gob.mx/LeyesBiblio/pdf/CPEUM.pdf
-.venv/bin/python -m extractor build --pdf CPEUM.pdf --out ../constitucion-mexicana
+# ¿Cada párrafo extraído está literal en el PDF y no falta texto entre párrafos?
+.venv/bin/python -m extractor auditar --pdf CPEUM.pdf --out ../constitucion-mexicana
 
-cd ../constitucion-mexicana
-git add -A
-git diff --cached            # revisar qué artículos cambiaron
-git commit -m "Reforma DOF DD-MM-YYYY: arts. X, Y"
+# Solo los artículos que difieren de HEAD en el repo de datos
+.venv/bin/python -m extractor verificar --sin-llm --pdf CPEUM.pdf --out ../constitucion-mexicana
 ```
 
 El `git log` del repo de datos queda como la historia de reformas; `git blame`
-sobre cualquier artículo muestra cuándo y cómo cambió cada párrafo.
+sobre cualquier artículo muestra cuándo y cómo cambió cada párrafo. El título
+de cada commit distingue una reforma de una corrección de extracción.
+
+Para trabajar en este repo, ver [`AGENTS.md`](AGENTS.md).
 
 ## Pruebas
 
