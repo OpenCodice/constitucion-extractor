@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from extractor.estados.san_luis_potosi import PERFIL, RESOLVER
+from extractor.normalize import normalize_body
 from extractor.parse import parse_text
 from scripts.resolver_pdf import elegir
 
@@ -52,3 +53,31 @@ def test_titulo_con_ordinal_compuesto():
     a, b = parse_text(txt, perfil=PERFIL)
     assert "TÍTULO" not in a.body and "JUSTICIA ADMINISTRATIVA" not in a.body
     assert b.titulo == "TÍTULO DECIMOSEGUNDO"
+
+
+def test_notas_del_articulo_abren_su_articulo():
+    # Las notas entre la denominación y el artículo (la envuelta, en un renglón)
+    # van al inicio del artículo; las del título y del capítulo se quitan.
+    txt = "\n".join([
+        "ARTICULO 89. El personal de las instituciones.",
+        "(TÍTULO ADICIONADO, P.O. 20 DE NOVIEMBRE DE 1996)",
+        "TÍTULO OCTAVO",
+        "DEL PODER JUDICIAL",
+        "(ADICIONADO, P.O. 20 DE NOVIEMBRE DE 1996)",
+        "CAPÍTULO I",
+        "Disposiciones Generales",
+        "(REFORMADO, P.O. 26 DE JULIO DE 2005)",
+        "(ARTÍCULO REFORMADO EN EL P.O. DEL EDO. EL 20 DE",
+        "NOVIEMBRE DE 1996)",
+        "ARTÍCULO 90. El Poder Judicial del Estado.",
+        "(REFORMADO, P.O. 1 DE ABRIL DE 2001)",
+        "ARTÍCULO 91. Texto del noventa y uno.",
+    ])
+    a89, a90, a91 = parse_text(txt, perfil=PERFIL)
+    assert a89.body.strip() == "ARTICULO 89. El personal de las instituciones."
+    assert normalize_body(a90.body, a90.label, perfil=PERFIL).split("\n\n") == [
+        "(REFORMADO, P.O. 26 DE JULIO DE 2005)",
+        "(ARTÍCULO REFORMADO EN EL P.O. DEL EDO. EL 20 DE NOVIEMBRE DE 1996)",
+        "El Poder Judicial del Estado."]
+    assert normalize_body(a91.body, a91.label, perfil=PERFIL).split("\n\n") == [
+        "(REFORMADO, P.O. 1 DE ABRIL DE 2001)", "Texto del noventa y uno."]

@@ -62,7 +62,7 @@ def test_notas_previas_y_denominacion_suelta():
     assert [a.key for a in arts] == ["001", "064", "067-bis"]
     md = render_markdown(arts[0], perfil=P)
     assert "(REFORMADO, G.O. 18 DE MARZO DE 2003)\n\nEl Estado de Veracruz" in md
-    assert "negativa;\n\ny\n\n(ADICIONADO, G.O. 4 DE NOVIEMBRE DE 2016)\n\nd) El Presidente" in md
+    assert "negativa; y\n\n(ADICIONADO, G.O. 4 DE NOVIEMBRE DE 2016)\n\nd) El Presidente" in md
     assert "DEL CONTROL" not in md
     md64 = render_markdown(arts[1], perfil=P)
     assert "2015)\n\nDEL CONTROL CONSTITUCIONAL\n\nPara el cumplimiento" in md64

@@ -209,6 +209,12 @@ def parse_text(clean_text: str, start: int = 1, *,
                 return None
         return None
 
+    def titulo_nuevo(titulo: str) -> tuple[str, str]:
+        """(título, capítulo) al registrar `titulo`. Un título distinto abre su
+        propia división: el capítulo del anterior no sigue vigente (un Título
+        sin capítulos no hereda "CAPITULO III" del que lo precede)."""
+        return titulo, (cur_capitulo if titulo == cur_titulo else "")
+
     idx_cuerpo: list[int] = []   # renglones de `lines` que forman el cuerpo actual
 
     def notas_previas(i: int) -> list[str]:
@@ -263,7 +269,7 @@ def parse_text(clean_text: str, start: int = 1, *,
             # Dentro de un bloque de encabezado: se registran Título/Capítulo
             # y se descarta la denominación (no es texto de ningún artículo).
             if perfil.titulo_re.match(stripped) and ENCABEZADO_RE.match(stripped):
-                cur_titulo = stripped
+                cur_titulo, cur_capitulo = titulo_nuevo(stripped)
             elif perfil.capitulo_re.match(stripped):
                 cur_capitulo = stripped
             continue
@@ -273,7 +279,7 @@ def parse_text(clean_text: str, start: int = 1, *,
                 saltar_hasta = fin
                 bloque_desde = i
                 if perfil.titulo_re.match(stripped):
-                    cur_titulo = stripped
+                    cur_titulo, cur_capitulo = titulo_nuevo(stripped)
                 elif perfil.capitulo_re.match(stripped):
                     cur_capitulo = stripped
                 continue
@@ -281,7 +287,7 @@ def parse_text(clean_text: str, start: int = 1, *,
         tm = perfil.titulo_re.match(stripped)
         if tm and current is None or (tm and stripped == tm.group(0)):
             if current is None or len(stripped) < 30:
-                cur_titulo = stripped
+                cur_titulo, cur_capitulo = titulo_nuevo(stripped)
                 continue
 
         cm = perfil.capitulo_re.match(stripped)

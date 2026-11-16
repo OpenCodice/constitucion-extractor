@@ -149,7 +149,7 @@ def test_denominacion_de_titulo_capitulo_seccion_no_se_pega_al_articulo_anterior
         "Artículo 5o. Cinco."]
     assert [(a.titulo, a.capitulo) for a in arts][1:] == [
         ("", "Capítulo II"), ("", "Capítulo II"),
-        ("Título Cuarto", "Capítulo II"), ("Título Quinto", "Capítulo I")]
+        ("Título Cuarto", ""), ("Título Quinto", "Capítulo I")]
     # La nota de la denominación no cuenta como reforma del artículo anterior.
     assert [d.year for d in arts[2].reform_dates] == []
 

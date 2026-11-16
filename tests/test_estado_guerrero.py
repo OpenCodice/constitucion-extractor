@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import date
 
 from extractor.estados.guerrero import PERFIL
+from extractor.normalize import normalize_body
 from extractor.parse import parse_text
 
 
@@ -49,3 +50,25 @@ def test_version_de_la_portada():
                "DEL ESTADO DE GUERRERO, P.O. EDICÍÓN No. 32 ALCANCE IV, DE FECHA MARTES 21\n"
                "DE ABRIL DE 2026.")
     assert PERFIL.version_de(portada) == date(2026, 4, 21)
+
+
+def test_nota_previa_abre_su_articulo():
+    # La nota (envuelta en dos renglones, más su "DECRETO 828" suelto) que precede
+    # al artículo queda al inicio de ese artículo; la que precede al encabezado
+    # anota la estructura y no va a ningún artículo.
+    txt = "\n".join([
+        "Artículo 70. Texto del setenta.",
+        "(REFORMADO, P.O. EDICIÓN 51 ALCANCE I, VIERNES 27 DE JUNIO DE 2025) DECRETO 828",
+        "TÍTULO SEXTO",
+        "PODER EJECUTIVO",
+        "(REFORMADO PRIMER PÁRRAFO, P.O. EDICIÓN 51 ALCANCE I, VIERNES 27 DE",
+        "JUNIO DE 2025)",
+        "DECRETO 828",
+        "Artículo 71. El Poder Ejecutivo se deposita en un sólo individuo.",
+    ])
+    a70, a71 = parse_text(txt, perfil=PERFIL)
+    assert a70.body.strip() == "Artículo 70. Texto del setenta."
+    assert normalize_body(a71.body, a71.label, perfil=PERFIL).split("\n\n") == [
+        "(REFORMADO PRIMER PÁRRAFO, P.O. EDICIÓN 51 ALCANCE I, VIERNES 27 DE JUNIO DE 2025) "
+        "DECRETO 828",
+        "El Poder Ejecutivo se deposita en un sólo individuo."]

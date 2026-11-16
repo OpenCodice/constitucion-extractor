@@ -33,12 +33,24 @@ MAX_NOTE_CONT_LINES = 4
 
 # Marcadores de inicio de fracción / inciso / apartado:
 #   "I.", "XiV.", "a)", "1.", "A. " (apartado), "Bis"
+# El numeral es de hasta tres cifras: "2026." al inicio de renglón es el año de
+# una fecha que el PDF partió ("6 de julio de\n2026. Con efectos..."), no un
+# elemento de lista.
 STRUCT_MARKER_RE = re.compile(
-    r"^(?:[IVXLCDM]+\.|[a-z]\)|\d+\.|[A-Z]\.\s)",
+    r"^(?:[IVXLCDM]+\.|[a-z]\)|\d{1,3}\.|[A-Z]\.\s)",
 )
 
 # Fin de oración / bloque: el renglón anterior cierra con punto o dos puntos.
 SENTENCE_END_RE = re.compile(r"[.:;]$")
+
+# Tras ";" el texto sigue en el mismo párrafo si el renglón siguiente arranca en
+# minúscula y no es un marcador ("…pueblos y comunidades;" / "su acceso a la
+# educación…", o el "y" suelto que cierra una enumeración): un párrafo nuevo
+# empieza con mayúscula, y un elemento de lista con su marcador ("II.", "a)").
+# Hay marcadores en minúscula que STRUCT_MARKER_RE no cubre: "b. El diseño…" y
+# el romano escrito con eles ("lll. A los partidos…", Jalisco).
+CONTINUA_TRAS_PUNTO_Y_COMA_RE = re.compile(
+    r"^(?!(?:[ivxlcdmIVXLCDM]+|[a-z])[.)](?:\s|$))[a-záéíóúüñ]")
 
 
 def _is_reform_note(line: str, perfil: PerfilFuente = CPEUM) -> bool:
@@ -111,7 +123,8 @@ def normalize_body(body: str, heading_label: str, *,
             continue
         # Continuación de párrafo, salvo que el bloque previo ya haya cerrado
         # oración (heurística para no pegar párrafos distintos).
-        if buf and SENTENCE_END_RE.search(buf[-1]):
+        if buf and SENTENCE_END_RE.search(buf[-1]) and not (
+                buf[-1].endswith(";") and CONTINUA_TRAS_PUNTO_Y_COMA_RE.match(s)):
             flush_buf()
         buf.append(s)
         i += 1

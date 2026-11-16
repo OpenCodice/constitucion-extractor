@@ -20,9 +20,15 @@ _CIERRE = r"(?:\s*\.\s*[-–—]?|\s*[-–—])?(?:\s|$|(?<=[.\-–—]))"
 _ARTICULO_RE = re.compile(r"^\s*(?:Art[íi]culo|ART[ÍI]CULO)\s+\d+")
 _ESTRUCTURA_RE = re.compile(
     r"^\s*(?:T[ÍI]TULO|CAP[ÍI]TULO|SECCI[ÓO]N|APARTADO|Derogado\s+CAP[ÍI]TULO)\b")
-_NOTA_RE = re.compile(r"^\s*\((?:REFORMAD|ADICIONAD|DEROGAD|RECORRID|REPUBLICAD|FE DE ERRATAS)")
+_NOTA = r"\((?:REFORMAD|ADICIONAD|DEROGAD|RECORRID|REPUBLICAD|FE DE ERRATAS)"
+_NOTA_RE = re.compile(r"^\s*" + _NOTA)
 _DECRETO_RE = re.compile(r"^\s*(?:\(?DECRETO\s+(?:No\.\s*)?\d+\)?|D-\s*\d+)\s*$")
 _APARTADO_RE = re.compile(r"^\s*APARTADO\s+\S+\s*$")
+# La nota de un párrafo o fracción derogados ocupa el lugar del texto que ya no
+# está: al final de su artículo, aunque le siga el encabezado del siguiente
+# ("(DEROGADO ULTIMO PARRAFO, …)" + "ARTÍCULO 19.-"). No es nota previa.
+_NOTAS_PREVIAS_RE = re.compile(
+    r"^\s*(?!\((?=[^)]*DEROGAD)[^)]*(?:P[ÁA]RRAFO|FRACC|INCISO))" + _NOTA + "|" + _DECRETO_RE.pattern)
 _DEROGADO_CAP_RE = re.compile(r"^\s*Derogado\s+CAP[ÍI]TULO\b")
 
 
@@ -41,23 +47,35 @@ def _fin_nota(lines: list[str], i: int) -> int:
 
 
 def _preprocess(texto: str) -> str:
-    """Quita lo que el PDF intercala ENTRE artículos y el parser pegaría al
-    artículo anterior: las notas de reforma, que en esta edición preceden al
-    elemento que anotan (artículo, título, capítulo, sección), y los encabezados
-    "APARTADO ..." y "Derogado CAPÍTULO ..." que el parser no reconoce como
-    estructura. Las notas seguidas de texto (párrafo, fracción) se quedan: anotan
-    texto del mismo artículo."""
+    """Prepara lo que el PDF intercala ENTRE artículos:
+
+    - Las notas de reforma, que en esta edición preceden al elemento que anotan
+      (artículo, título, capítulo, sección), quedan cada una en un renglón (con
+      su "DECRETO 828" suelto) para que `notas_previas` las lleve al
+      artículo siguiente. Las seguidas de texto (párrafo, fracción) no se tocan:
+      anotan texto del mismo artículo.
+    - Quita los encabezados "APARTADO ..." y "Derogado CAPÍTULO ...", que el
+      parser no reconoce como estructura y pegaría al artículo anterior."""
     lines = texto.splitlines()
     borrar: set[int] = set()
+    unidas: dict[int, str] = {}
     i = 0
     while i < len(lines):
         if _NOTA_RE.match(lines[i]):
             # Junta notas consecutivas y mira qué viene después de todas ellas.
-            j = i
-            while j < len(lines) and (_NOTA_RE.match(lines[j]) or not lines[j].strip()):
-                j = _fin_nota(lines, j) if lines[j].strip() else j + 1
+            j, notas = i, []
+            while j < len(lines) and (_NOTA_RE.match(lines[j]) or _DECRETO_RE.match(lines[j])
+                                      or not lines[j].strip()):
+                fin = _fin_nota(lines, j) if _NOTA_RE.match(lines[j]) else j + 1
+                notas.append((j, fin))
+                j = fin
             if j < len(lines) and (_ARTICULO_RE.match(lines[j]) or _ESTRUCTURA_RE.match(lines[j])):
-                borrar.update(range(i, j))
+                for a, b in notas:
+                    if lines[a].strip():
+                        # En un solo renglón y párrafo propio: el normalizador no la pega a
+                        # la nota o al texto vecinos.
+                        unidas[a] = " ".join(ln.strip() for ln in lines[a:b]) + "\n"
+                        borrar.update(range(a + 1, b))
             i = max(j, i + 1)
             continue
         if _APARTADO_RE.match(lines[i]):
@@ -77,7 +95,7 @@ def _preprocess(texto: str) -> str:
             i = j
             continue
         i += 1
-    return "\n".join(ln for k, ln in enumerate(lines) if k not in borrar)
+    return "\n".join(unidas.get(k, ln) for k, ln in enumerate(lines) if k not in borrar)
 
 
 def _version(texto: str) -> Optional[date]:
@@ -107,6 +125,8 @@ PERFIL = replace(
         transitorios_re=re.compile(r"^[ \t]*T ?R ?A ?N ?S ?I ?T ?O ?R ?I ?O ?S[ \t]*$", re.MULTILINE),
         version_de=_version,
         preprocess=_preprocess,
+        notas_previas=_NOTAS_PREVIAS_RE,
+        notas_previas_encabezado=True,
     ),
     article_re=re.compile(_ENCABEZADO + _CIERRE),
     article_strip_re=re.compile(_ENCABEZADO + _CIERRE + r"\s*"),
