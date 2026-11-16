@@ -59,17 +59,17 @@ RESOLVERS: dict[str, dict] = {
 }
 
 
-# Worker de Cloudflare en México (ver descargas-mx/): para los estados cuyo
+# Worker de Cloudflare en México (ver egress-mx/): para los estados cuyo
 # sitio rechaza IP de fuera del país ("via": "mx" en su RESOLVER).
-DESCARGAS_MX = os.environ.get("DESCARGAS_MX_URL", "https://descargas-mx.danielcardeenas.workers.dev/")
+EGRESS_MX = os.environ.get("EGRESS_MX_URL", "https://egress-mx.danielcardeenas.workers.dev/")
 
 
 def via_mx(url: str) -> tuple[str, dict]:
     """URL y cabeceras para pedir `url` a través del Worker en México."""
-    token = os.environ.get("DESCARGAS_MX_TOKEN", "")
+    token = os.environ.get("EGRESS_MX_TOKEN", "")
     if not token:
-        raise SystemExit("falta DESCARGAS_MX_TOKEN para descargar vía México")
-    return f"{DESCARGAS_MX}?url={quote(url, safe='')}", {"Authorization": f"Bearer {token}"}
+        raise SystemExit("falta EGRESS_MX_TOKEN para descargar vía México")
+    return f"{EGRESS_MX}?url={quote(url, safe='')}", {"Authorization": f"Bearer {token}"}
 
 
 def _fetch_text(url: str, encoding: str, via: str | None = None) -> str:

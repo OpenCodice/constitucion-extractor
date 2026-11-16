@@ -63,7 +63,7 @@ def test_orden_ddmmaaaa():
 
 
 def test_via_mx_arma_la_url_del_worker(monkeypatch):
-    monkeypatch.setenv("DESCARGAS_MX_TOKEN", "t")
+    monkeypatch.setenv("EGRESS_MX_TOKEN", "t")
     url, cab = resolver_pdf.via_mx("https://legislacion.edomex.gob.mx/a b.pdf")
-    assert url.startswith(resolver_pdf.DESCARGAS_MX + "?url=https%3A%2F%2F")
+    assert url.startswith(resolver_pdf.EGRESS_MX + "?url=https%3A%2F%2F")
     assert cab == {"Authorization": "Bearer t"}
