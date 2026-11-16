@@ -41,6 +41,12 @@ env:
   EXTRACTOR_REPO: https://github.com/OpenCodice/constitucion-extractor.git
   TIENE_CLAUDE: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
 
+# Una corrida a la vez (el programador, su vigilante o una a mano pueden
+# coincidir); la siguiente espera en cola.
+concurrency:
+  group: vigilar-leyes-estatales
+  cancel-in-progress: false
+
 jobs:
   planear:
     runs-on: ubuntu-latest

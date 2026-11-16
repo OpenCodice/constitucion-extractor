@@ -28,6 +28,12 @@ env:
   PDF_URL: https://www.diputados.gob.mx/LeyesBiblio/pdf/CPEUM.pdf
   TIENE_CLAUDE: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
 
+# Una corrida a la vez (el programador, su vigilante o una a mano pueden
+# coincidir); la siguiente espera en cola.
+concurrency:
+  group: vigilar-constitucion-mexicana
+  cancel-in-progress: false
+
 jobs:
   vigilar:
     runs-on: ubuntu-latest
