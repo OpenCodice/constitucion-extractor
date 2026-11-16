@@ -16,9 +16,11 @@ Solo usa la librería estándar (urllib) para no añadir dependencias al CI.
 Uso:
     python scripts/resolver_pdf.py jalisco        # imprime la URL vigente
     python scripts/resolver_pdf.py --listar       # estados soportados
+    python scripts/resolver_pdf.py --matriz       # matriz JSON de la vigilancia
 """
 from __future__ import annotations
 
+import json
 import re
 import sys
 from datetime import date
@@ -99,6 +101,12 @@ def resolver(estado: str) -> str:
 def main(argv: list[str]) -> int:
     if not argv or argv[0] in ("-h", "--help"):
         print(__doc__)
+        return 0
+    if argv[0] == "--matriz":
+        # La vigilancia corre un job por estado con vigilancia automática; el
+        # perfil y la carpeta llevan el mismo nombre que el estado.
+        print(json.dumps([{"estado": e, "perfil": e, "dir": f"{e}/constitucion"}
+                          for e, c in RESOLVERS.items() if c["tipo"] != "manual"]))
         return 0
     if argv[0] == "--listar":
         for e, c in RESOLVERS.items():
