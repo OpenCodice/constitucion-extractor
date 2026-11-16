@@ -8,12 +8,12 @@ const ORG = "OpenCodice";
 
 // Qué se lanza y cuándo (UTC). `cron` debe estar también en wrangler.jsonc.
 const VIGILANCIAS = [
-  { repo: "fiscal-mexicano", workflow: "vigilar-fiscal.yml", cron: "0 9 * * 1" },
+  { repo: "fiscal-extractor", workflow: "vigilar-fiscal.yml", cron: "0 9 * * 1" },
   // La vigilancia vive en los extractores; cada una abre su PR en su repo de datos.
   { repo: "constitucion-extractor", workflow: "vigilar-cpeum.yml", cron: "0 9 * * 1" },
   { repo: "constitucion-extractor", workflow: "vigilar-estatales.yml", cron: "0 9 * * 1" },
   // Después de la fiscal: las dos publican arreglos en fiscal-extractor.
-  { repo: "leyes-federales", workflow: "vigilar.yml", cron: "0 13 * * 1" },
+  { repo: "fiscal-extractor", workflow: "vigilar-federal.yml", cron: "0 13 * * 1" },
 ];
 
 // El vigilante: si una vigilancia lleva más de esto sin ninguna corrida, se lanza.
