@@ -23,5 +23,7 @@ def cargar_estados() -> dict:
 
 def resolvers_estados() -> dict:
     """Cómo encontrar el PDF vigente de cada estado (ver scripts/resolver_pdf.py).
-    Un estado sin `RESOLVER` queda en vigilancia manual."""
-    return {estado: getattr(mod, "RESOLVER", {"tipo": "manual"}) for estado, mod in _modulos()}
+    Un estado sin `RESOLVER`, o que aún no reproduce fielmente su PDF
+    (`LISTO = False`), queda fuera de la vigilancia automática."""
+    return {estado: (getattr(mod, "RESOLVER", None) if getattr(mod, "LISTO", False) else None)
+            or {"tipo": "manual"} for estado, mod in _modulos()}
