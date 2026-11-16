@@ -24,6 +24,9 @@ está mal, se corrige aquí.
 - `scripts/agente/` — el agente de CI: `brief.md` (su encargo), `correr.sh`
   (lo lanza) y `cerrar.sh` (compuertas deterministas, publica su arreglo).
 - `scripts/resolver_pdf.py` — URL vigente del PDF de un estado.
+- `descargas-mx/` — Worker de Cloudflare que descarga desde México las fuentes
+  cuyos sitios rechazan IP extranjeras (los estados con `"via": "mx"` en su
+  `RESOLVER`). Se despliega a mano; ver su README.
 - `scripts/pr_summary.py` — cuerpo del PR de vigilancia.
 - `.github/workflows/credenciales.yml` — comprobación mensual de `PR_TOKEN` y
   `CLAUDE_CODE_OAUTH_TOKEN`, las credenciales de organización que usa la

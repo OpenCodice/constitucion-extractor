@@ -1,0 +1,10 @@
+{
+  "name": "descargas-mx",
+  "main": "worker.js",
+  "compatibility_date": "2026-11-01",
+  // Correr junto a la región de AWS en Querétaro: Cloudflare lo coloca en su
+  // centro de datos de Ciudad de México, cuya salida aceptan los sitios .gob.mx
+  // que bloquean IP extranjeras.
+  "placement": { "region": "aws:mx-central-1" },
+  "workers_dev": true
+}

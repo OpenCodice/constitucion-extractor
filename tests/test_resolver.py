@@ -50,3 +50,20 @@ def test_no_confunde_otras_leyes():
     import pytest
     with pytest.raises(SystemExit):
         resolver_pdf.elegir_mas_reciente(solo_leyes, JAL["patron"], JAL["index_url"])
+
+
+def test_orden_ddmmaaaa():
+    import re
+    html = ('<a href="leyes/LeyesPDF/CONSTITUCION13012025.pdf">a</a>'
+            '<a href="leyes/LeyesPDF/CONSTITUCION30102026AI.pdf">b</a>'
+            '<a href="leyes/LeyesPDF/CONSTITUCION31122025.pdf">c</a>')
+    pat = re.compile(r'href="(leyes/LeyesPDF/CONSTITUCION(\d{8})\w*\.pdf)"')
+    url = resolver_pdf.elegir(html, pat, "https://www.legisver.gob.mx/Inicio.php", "ddmmaaaa")
+    assert url.endswith("CONSTITUCION30102026AI.pdf")
+
+
+def test_via_mx_arma_la_url_del_worker(monkeypatch):
+    monkeypatch.setenv("DESCARGAS_MX_TOKEN", "t")
+    url, cab = resolver_pdf.via_mx("https://legislacion.edomex.gob.mx/a b.pdf")
+    assert url.startswith(resolver_pdf.DESCARGAS_MX + "?url=https%3A%2F%2F")
+    assert cab == {"Authorization": "Bearer t"}

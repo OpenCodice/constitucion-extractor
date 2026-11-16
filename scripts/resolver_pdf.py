@@ -22,6 +22,7 @@ Uso:
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from datetime import date
@@ -58,9 +59,26 @@ RESOLVERS: dict[str, dict] = {
 }
 
 
-def _fetch_text(url: str, encoding: str) -> str:
-    req = Request(url, headers={"User-Agent": _UA})
-    with urlopen(req, timeout=60) as r:               # nosec: URL fija de config
+# Worker de Cloudflare en México (ver descargas-mx/): para los estados cuyo
+# sitio rechaza IP de fuera del país ("via": "mx" en su RESOLVER).
+DESCARGAS_MX = os.environ.get("DESCARGAS_MX_URL", "https://descargas-mx.danielcardeenas.workers.dev/")
+
+
+def via_mx(url: str) -> tuple[str, dict]:
+    """URL y cabeceras para pedir `url` a través del Worker en México."""
+    token = os.environ.get("DESCARGAS_MX_TOKEN", "")
+    if not token:
+        raise SystemExit("falta DESCARGAS_MX_TOKEN para descargar vía México")
+    return f"{DESCARGAS_MX}?url={quote(url, safe='')}", {"Authorization": f"Bearer {token}"}
+
+
+def _fetch_text(url: str, encoding: str, via: str | None = None) -> str:
+    headers = {"User-Agent": _UA}
+    if via == "mx":
+        url, extra = via_mx(url)
+        headers.update(extra)
+    req = Request(url, headers=headers)
+    with urlopen(req, timeout=90) as r:               # nosec: URL fija de config
         return r.read().decode(encoding, errors="replace")
 
 
@@ -82,7 +100,7 @@ def elegir_mas_reciente(html: str, patron: re.Pattern, index_url: str) -> str:
 
 
 def _resolver_indice(cfg: dict) -> str:
-    html = _fetch_text(cfg["index_url"], cfg.get("encoding", "utf-8"))
+    html = _fetch_text(cfg["index_url"], cfg.get("encoding", "utf-8"), cfg.get("via"))
     orden = cfg.get("orden", "ddmmyy")
     if orden == "ddmmyy":
         return elegir_mas_reciente(html, cfg["patron"], cfg["index_url"])
@@ -96,7 +114,8 @@ def elegir(html: str, patron: re.Pattern, index_url: str, orden: str,
     - "unico": todas las coincidencias deben ser la misma ruta (si el índice
       enlaza dos constituciones distintas, mejor fallar que adivinar);
     - "yyyymmdd" / "fecha": el grupo 2 es la fecha (AAAAMMDD, o AAAA-MM-DD en
-      cualquier separador) y gana la más reciente.
+      cualquier separador) y gana la más reciente;
+    - "ddmmaaaa": igual, con la fecha en orden día-mes-año.
     `plantilla` arma la URL final con la ruta capturada (`{0}`). Función pura."""
     ms = [m if isinstance(m, tuple) else (m,) for m in patron.findall(html)]
     if not ms:
@@ -108,6 +127,8 @@ def elegir(html: str, patron: re.Pattern, index_url: str, orden: str,
         rel = ms[0][0]
     elif orden in ("yyyymmdd", "fecha"):
         rel = max(ms, key=lambda m: re.sub(r"\D", "", m[1]))[0]
+    elif orden == "ddmmaaaa":
+        rel = max(ms, key=lambda m: (d := re.sub(r"\D", "", m[1]))[4:8] + d[2:4] + d[0:2])[0]
     else:
         raise SystemExit(f"orden desconocido: {orden!r}")
     url = plantilla.format(rel) if plantilla else urljoin(index_url, rel)
@@ -147,7 +168,8 @@ def main(argv: list[str]) -> int:
     if argv[0] == "--matriz":
         # La vigilancia corre un job por estado con vigilancia automática; el
         # perfil y la carpeta llevan el mismo nombre que el estado.
-        print(json.dumps([{"estado": e, "perfil": e, "dir": f"{e}/constitucion"}
+        print(json.dumps([{"estado": e, "perfil": e, "dir": f"{e}/constitucion",
+                           "via": c.get("via") or ""}
                           for e, c in RESOLVERS.items() if c["tipo"] != "manual"]))
         return 0
     if argv[0] == "--listar":
