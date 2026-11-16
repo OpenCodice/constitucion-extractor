@@ -57,8 +57,9 @@ API de OpenAI; es una herramienta manual opcional y la CI no la usa.
 
 ## Agregar un estado
 
-1. Perfil nuevo en `extractor/fuentes.py` y su resolver en
-   `scripts/resolver_pdf.py`, con el mismo nombre (el slug del estado).
+1. Un módulo `extractor/estados/<slug>.py` (guion → guion bajo) con su
+   `PERFIL` y su `RESOLVER`; el slug es el de `ENTIDADES` en
+   `extractor/estados/__init__.py`.
 2. Construir en `leyes-estatales/{estado}/constitucion/` y dejar `auditar` en
    cero problemas.
 3. Marcar `LISTO = True` en su módulo y regenerar `estados.json`
