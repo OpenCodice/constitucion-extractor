@@ -11,7 +11,8 @@ está mal, se corrige aquí.
 - `extractor/perfil.py` — `PerfilFuente`: todo lo que varía entre un PDF y otro
   (regex de artículo, encabezados y pies de página, estilo de ordinal, cómo se
   leen las fechas de reforma). `CPEUM` es el perfil federal.
-- `extractor/fuentes.py` — registro de perfiles: `cpeum`, `jalisco`, `cdmx`.
+- `extractor/fuentes.py` — registro de perfiles: `cpeum`, `jalisco`, `cdmx` y
+  los de `extractor/estados/` (un módulo por estado).
 - `extractor/parse.py` — texto limpio del PDF → lista de `Article`.
 - `extractor/normalize.py` — cuerpo crudo → párrafos, notas de reforma en cursiva.
 - `extractor/segments.py`, `passages.py`, `locate.py` — metadata derivada:
@@ -60,5 +61,9 @@ API de OpenAI; es una herramienta manual opcional y la CI no la usa.
    `scripts/resolver_pdf.py`, con el mismo nombre (el slug del estado).
 2. Construir en `leyes-estatales/{estado}/constitucion/` y dejar `auditar` en
    cero problemas.
-3. Nada más: la vigilancia de `leyes-estatales` toma los estados de
-   `resolver_pdf.py --matriz`.
+3. Marcar `LISTO = True` en su módulo y regenerar `estados.json`
+   (`python scripts/estados_json.py`; una prueba exige que esté al día). La
+   vigilancia de `leyes-estatales` toma los estados de `resolver_pdf.py
+   --matriz` y constitucion.app lee `estados.json`. Un estado que no logra
+   quedar fiel, o cuyo PDF oficial no es alcanzable, lleva `LISTO = False` y un
+   `MOTIVO` en lenguaje llano, que se publica en constitucion.app/leyes.

@@ -1,0 +1,226 @@
+[
+ {
+  "estado": "aguascalientes",
+  "nombre": "Aguascalientes",
+  "situacion": "en_preparacion",
+  "motivo": null,
+  "documento": null
+ },
+ {
+  "estado": "baja-california",
+  "nombre": "Baja California",
+  "situacion": "en_preparacion",
+  "motivo": null,
+  "documento": null
+ },
+ {
+  "estado": "baja-california-sur",
+  "nombre": "Baja California Sur",
+  "situacion": "en_preparacion",
+  "motivo": null,
+  "documento": null
+ },
+ {
+  "estado": "campeche",
+  "nombre": "Campeche",
+  "situacion": "en_preparacion",
+  "motivo": null,
+  "documento": "Constitución Política del Estado de Campeche"
+ },
+ {
+  "estado": "chiapas",
+  "nombre": "Chiapas",
+  "situacion": "en_preparacion",
+  "motivo": null,
+  "documento": "Constitución Política del Estado Libre y Soberano de Chiapas"
+ },
+ {
+  "estado": "chihuahua",
+  "nombre": "Chihuahua",
+  "situacion": "en_preparacion",
+  "motivo": null,
+  "documento": "Constitución Política del Estado Libre y Soberano de Chihuahua"
+ },
+ {
+  "estado": "cdmx",
+  "nombre": "Ciudad de México",
+  "situacion": "vigilada",
+  "motivo": null,
+  "documento": null
+ },
+ {
+  "estado": "coahuila",
+  "nombre": "Coahuila",
+  "situacion": "en_preparacion",
+  "motivo": null,
+  "documento": "Constitución Política del Estado de Coahuila de Zaragoza"
+ },
+ {
+  "estado": "colima",
+  "nombre": "Colima",
+  "situacion": "en_preparacion",
+  "motivo": null,
+  "documento": "Constitución Política del Estado Libre y Soberano de Colima"
+ },
+ {
+  "estado": "durango",
+  "nombre": "Durango",
+  "situacion": "en_preparacion",
+  "motivo": null,
+  "documento": "Constitución Política del Estado Libre y Soberano de Durango"
+ },
+ {
+  "estado": "edomex",
+  "nombre": "Estado de México",
+  "situacion": "en_preparacion",
+  "motivo": null,
+  "documento": null
+ },
+ {
+  "estado": "guanajuato",
+  "nombre": "Guanajuato",
+  "situacion": "en_preparacion",
+  "motivo": null,
+  "documento": "Constitución Política del Estado Libre y Soberano de Guanajuato"
+ },
+ {
+  "estado": "guerrero",
+  "nombre": "Guerrero",
+  "situacion": "en_preparacion",
+  "motivo": null,
+  "documento": "Constitución Política del Estado Libre y Soberano de Guerrero"
+ },
+ {
+  "estado": "hidalgo",
+  "nombre": "Hidalgo",
+  "situacion": "en_preparacion",
+  "motivo": null,
+  "documento": "Constitución Política del Estado de Hidalgo"
+ },
+ {
+  "estado": "jalisco",
+  "nombre": "Jalisco",
+  "situacion": "vigilada",
+  "motivo": null,
+  "documento": null
+ },
+ {
+  "estado": "michoacan",
+  "nombre": "Michoacán",
+  "situacion": "en_preparacion",
+  "motivo": null,
+  "documento": null
+ },
+ {
+  "estado": "morelos",
+  "nombre": "Morelos",
+  "situacion": "en_preparacion",
+  "motivo": null,
+  "documento": null
+ },
+ {
+  "estado": "nayarit",
+  "nombre": "Nayarit",
+  "situacion": "en_preparacion",
+  "motivo": null,
+  "documento": "Constitución Política del Estado Libre y Soberano de Nayarit"
+ },
+ {
+  "estado": "nuevo-leon",
+  "nombre": "Nuevo León",
+  "situacion": "vigilada",
+  "motivo": null,
+  "documento": "Constitución Política del Estado Libre y Soberano de Nuevo León"
+ },
+ {
+  "estado": "oaxaca",
+  "nombre": "Oaxaca",
+  "situacion": "en_preparacion",
+  "motivo": null,
+  "documento": "Constitución Política del Estado Libre y Soberano de Oaxaca"
+ },
+ {
+  "estado": "puebla",
+  "nombre": "Puebla",
+  "situacion": "en_preparacion",
+  "motivo": null,
+  "documento": null
+ },
+ {
+  "estado": "queretaro",
+  "nombre": "Querétaro",
+  "situacion": "en_preparacion",
+  "motivo": null,
+  "documento": null
+ },
+ {
+  "estado": "quintana-roo",
+  "nombre": "Quintana Roo",
+  "situacion": "en_preparacion",
+  "motivo": null,
+  "documento": null
+ },
+ {
+  "estado": "san-luis-potosi",
+  "nombre": "San Luis Potosí",
+  "situacion": "en_preparacion",
+  "motivo": null,
+  "documento": null
+ },
+ {
+  "estado": "sinaloa",
+  "nombre": "Sinaloa",
+  "situacion": "en_preparacion",
+  "motivo": null,
+  "documento": "Constitución Política del Estado de Sinaloa"
+ },
+ {
+  "estado": "sonora",
+  "nombre": "Sonora",
+  "situacion": "en_preparacion",
+  "motivo": null,
+  "documento": "Constitución Política del Estado Libre y Soberano de Sonora"
+ },
+ {
+  "estado": "tabasco",
+  "nombre": "Tabasco",
+  "situacion": "en_preparacion",
+  "motivo": null,
+  "documento": "Constitución Política del Estado Libre y Soberano de Tabasco"
+ },
+ {
+  "estado": "tamaulipas",
+  "nombre": "Tamaulipas",
+  "situacion": "en_preparacion",
+  "motivo": null,
+  "documento": "Constitución Política del Estado de Tamaulipas"
+ },
+ {
+  "estado": "tlaxcala",
+  "nombre": "Tlaxcala",
+  "situacion": "en_preparacion",
+  "motivo": null,
+  "documento": "Constitución Política del Estado Libre y Soberano de Tlaxcala"
+ },
+ {
+  "estado": "veracruz",
+  "nombre": "Veracruz",
+  "situacion": "en_preparacion",
+  "motivo": null,
+  "documento": null
+ },
+ {
+  "estado": "yucatan",
+  "nombre": "Yucatán",
+  "situacion": "en_preparacion",
+  "motivo": null,
+  "documento": "Constitución Política del Estado de Yucatán"
+ },
+ {
+  "estado": "zacatecas",
+  "nombre": "Zacatecas",
+  "situacion": "en_preparacion",
+  "motivo": null,
+  "documento": "Constitución Política del Estado Libre y Soberano de Zacatecas"
+ }
+]
