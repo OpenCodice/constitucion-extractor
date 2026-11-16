@@ -72,9 +72,9 @@
  {
   "estado": "edomex",
   "nombre": "Estado de México",
-  "situacion": "fuera",
-  "motivo": "El único sitio oficial que publica el texto vigente no permite descargarlo desde fuera de México.",
-  "documento": null
+  "situacion": "vigilada",
+  "motivo": null,
+  "documento": "Constitución Política del Estado Libre y Soberano de México"
  },
  {
   "estado": "guanajuato",
@@ -205,9 +205,9 @@
  {
   "estado": "veracruz",
   "nombre": "Veracruz",
-  "situacion": "fuera",
-  "motivo": "Los sitios del Congreso y del Gobierno de Veracruz no permiten descargar la Constitución desde fuera de México.",
-  "documento": null
+  "situacion": "vigilada",
+  "motivo": null,
+  "documento": "Constitución Política del Estado Libre y Soberano de Veracruz de Ignacio de la Llave"
  },
  {
   "estado": "yucatan",

@@ -1,4 +1,4 @@
-"""Constitución Política del Estado de Veracruz de Ignacio de la Llave."""
+"""Constitución Política del Estado Libre y Soberano de Veracruz de Ignacio de la Llave."""
 from __future__ import annotations
 
 import re
