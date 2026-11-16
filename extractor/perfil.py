@@ -232,7 +232,7 @@ def perfil_estatal(
             r"^T[íi]tulo\s+(Primero|Segundo|Tercero|Cuarto|Quinto|Sexto|"
             r"S[ée]ptimo|Octavo|Noveno|D[ée]cimo)\b.*$", re.IGNORECASE),
         capitulo_re=re.compile(
-            r"^Cap[íi]tulo\s+([IVXLC]+)(\s+(?:Bis|Ter|Qu[áa]ter|(?-i:[A-Z])))?\s*$", re.IGNORECASE),
+            r"^Cap[íi]tulo\s+([IVXLC]+)(\s+(?:Bis|Ter|Qu[áa]ter|(?-i:[A-Z])))?\.?\s*$", re.IGNORECASE),
         transitorios_re=transitorios_re or re.compile(
             r"^[ \t]*(?:Art[íi]culos?\s+Transitorios?|TRANSITORIOS?)[ \t]*$",
             re.MULTILINE | re.IGNORECASE),
