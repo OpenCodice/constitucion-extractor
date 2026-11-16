@@ -16,9 +16,9 @@
  {
   "estado": "baja-california-sur",
   "nombre": "Baja California Sur",
-  "situacion": "fuera",
-  "motivo": "El Congreso publica la Constitución solo en formato Word, no en PDF.",
-  "documento": null
+  "situacion": "vigilada",
+  "motivo": null,
+  "documento": "Constitución Política del Estado Libre y Soberano de Baja California Sur"
  },
  {
   "estado": "campeche",
