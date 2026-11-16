@@ -207,14 +207,6 @@ jobs:
             echo "Sin cambios: el texto vigente coincide con el repo."
           fi
 
-      - name: Actualizar el PDF fuente (solo si hubo reforma)
-        if: steps.url.outputs.skip == 'false' && steps.cambios.outputs.hay_cambios == 'true'
-        run: |
-          cp /tmp/estatal.pdf "$GITHUB_WORKSPACE/${{ matrix.dir }}/fuente/constitucion.pdf"
-          if [ "${{ matrix.formato }}" = "doc" ]; then
-            cp /tmp/estatal.doc "$GITHUB_WORKSPACE/${{ matrix.dir }}/fuente/constitucion.doc"
-          fi
-
       - name: Generar cuerpo del PR
         if: steps.url.outputs.skip == 'false' && steps.cambios.outputs.hay_cambios == 'true'
         run: |
@@ -238,6 +230,25 @@ jobs:
           fi
           cat /tmp/cuerpo.md
 
+      - name: Commit con trailers
+        # El tipo (reforma, corrección) sale de la causa, no del agente: si el
+        # PDF cambió y el extractor actual también lee distinto el anterior, son
+        # dos commits. El PDF nuevo (y el Word original) entra a fuente/ con la
+        # reforma.
+        id: commits
+        if: steps.url.outputs.skip == 'false' && steps.cambios.outputs.hay_cambios == 'true' && steps.veredicto.outputs.ok == 'true'
+        env:
+          URL: ${{ steps.url.outputs.url }}
+        run: |
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
+          args=()
+          [ "${{ matrix.formato }}" = "doc" ] && args+=(--doc /tmp/estatal.doc)
+          [ -n "$VER" ] && args+=(--version "$VER")
+          PYTHONPATH=/tmp/extractor python /tmp/extractor/scripts/commits_constitucion.py "$GITHUB_WORKSPACE" \
+            --documento "${{ matrix.dir }}" --perfil "${{ matrix.perfil }}" \
+            --pdf /tmp/estatal.pdf --url "$URL" "${args[@]}"
+
       - name: Abrir Pull Request
         id: pr
         # Solo se publica lo verificado. Lo que no pasó las compuertas no se
@@ -254,13 +265,12 @@ jobs:
           base: main
           title: '🏛️ Posible reforma — ${{ matrix.estado }} (detección automática)'
           body-path: /tmp/cuerpo.md
-          commit-message: 'Actualización automática del texto vigente — ${{ matrix.estado }}'
           add-paths: ${{ matrix.dir }}/**
           labels: |
             reforma
             automatico
             verificado
-            ${{ steps.agente.outputs.tipo == 'correccion' && 'correccion-extraccion' || '' }}
+            ${{ steps.commits.outputs.tipo == 'correccion' && 'correccion-extraccion' || '' }}
           delete-branch: true
 
       - name: Anotar lo que no se publicó

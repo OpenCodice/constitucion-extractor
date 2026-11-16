@@ -115,14 +115,6 @@ jobs:
             fi
           fi
 
-      - name: Actualizar el PDF fuente (solo si hubo reforma)
-        # Va en el mismo commit que las coordenadas regeneradas: PDF y datos
-        # quedan sincronizados.
-        if: steps.cambios.outputs.hay_cambios == 'true'
-        run: |
-          mkdir -p fuente
-          cp /tmp/CPEUM.pdf fuente/CPEUM.pdf
-
       - name: Generar cuerpo del PR
         if: steps.cambios.outputs.hay_cambios == 'true'
         run: |
@@ -131,6 +123,18 @@ jobs:
             { echo; cat /tmp/verificacion.md; } >> /tmp/cuerpo.md
           fi
           cat /tmp/cuerpo.md
+
+      - name: Commit con trailers
+        # El tipo (reforma, corrección) sale de la causa, no del agente: si el
+        # PDF cambió y el extractor actual también lee distinto el anterior, son
+        # dos commits. El PDF nuevo entra a fuente/ con la reforma.
+        id: commits
+        if: steps.cambios.outputs.hay_cambios == 'true' && steps.veredicto.outputs.ok == 'true'
+        run: |
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
+          PYTHONPATH=/tmp/extractor python /tmp/extractor/scripts/commits_constitucion.py "$GITHUB_WORKSPACE" \
+            --documento cpeum --perfil cpeum --pdf /tmp/CPEUM.pdf --url "$PDF_URL"
 
       - name: Abrir Pull Request
         id: pr
@@ -148,12 +152,11 @@ jobs:
           base: main
           title: '🏛️ Posible reforma a la CPEUM (detección automática)'
           body-path: /tmp/cuerpo.md
-          commit-message: 'Actualización automática del texto vigente de la CPEUM'
           labels: |
             reforma
             automatico
             verificado
-            ${{ steps.agente.outputs.tipo == 'correccion' && 'correccion-extraccion' || '' }}
+            ${{ steps.commits.outputs.tipo == 'correccion' && 'correccion-extraccion' || '' }}
           delete-branch: true
 
       - name: Anotar lo que no se publicó

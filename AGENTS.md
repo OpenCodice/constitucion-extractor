@@ -32,6 +32,11 @@ está mal, se corrige aquí.
   cuyos sitios rechazan IP extranjeras (los estados con `"via": "mx"` en su
   `RESOLVER`). Se despliega a mano; ver su README.
 - `scripts/pr_summary.py` — cuerpo del PR de vigilancia.
+- `scripts/commits_constitucion.py` — hace el commit (o los dos) del documento
+  regenerado, con sus trailers; `scripts/trailers.py` los calcula y
+  `scripts/validar_commits.py` los comprueba en `revisar-pr` de cada repo de
+  datos. `trailers.py` y `validar_commits.py` existen idénticos en
+  `fiscal-extractor` (y `tests/test_trailers.py`): un cambio se hace en los dos.
 - `.github/workflows/vigilar-cpeum.yml` y `vigilar-estatales.yml` — la
   vigilancia de `constitucion-mexicana` y `leyes-estatales`. Viven aquí, no en
   los repos de datos, para que el historial de esos repos solo tenga cambios de
@@ -57,6 +62,48 @@ está mal, se corrige aquí.
 `HEAD` en el repo de datos. `verificar` sin `--sin-llm` añade una revisión por
 API de OpenAI; es una herramienta manual opcional y la CI no la usa.
 
+## Commits de datos y sus trailers
+
+Cada commit de `constitucion-mexicana` y `leyes-estatales` lleva, además del
+título, trailers de git calculados por código, nunca por el agente (su
+veredicto solo dice si la extracción es fiel):
+
+```
+Reforma CPEUM (DOF 2026-10-07): arts. 82, 116, 122
+
+Documento: cpeum
+Tipo: reforma
+Publicacion: 2026-10-07
+Publicacion-Origen: notas
+Medio: DOF
+Articulos-Modificados: 082, 116, 122
+Fuente: https://www.diputados.gob.mx/LeyesBiblio/pdf/CPEUM.pdf
+Fuente-Sha256: cefb525a…
+Extractor: OpenCodice/constitucion-extractor@e3ae3f5
+```
+
+- `Documento`: `cpeum` o `<estado>/constitucion`. `Medio`: `DOF`, o en un
+  estado la parte de `PerfilFuente.fuente` antes de " — " (el título usa sus
+  iniciales: `P.O.`).
+- `Tipo` por la causa: el archivo oficial descargado (el `.doc` en los estados
+  que publican Word) igual al de `fuente/` → `correccion`; distinto → se
+  reconstruye el PDF de `fuente/` con el extractor actual: lo que eso cambia
+  respecto de lo publicado es un primer commit `correccion` (con la fuente
+  anterior) y el resto, la `reforma`, que trae el PDF nuevo a `fuente/`.
+  Documento nuevo → `alta`.
+- `Publicacion`: fechas de reforma nuevas en la metadata (`notas`); si no hay,
+  la versión de la portada (`portada`). Solo en `reforma` y `alta`.
+- `Articulos-Adicionados` / `-Modificados` / `-Derogados` en una reforma
+  (derogado: el cuerpo pasa a "Se deroga"/"Derogado", o el archivo
+  desaparece); `Articulos-Corregidos` en una corrección. Claves de archivo.
+- `revisar-pr` del repo de datos corre `scripts/validar_commits.py` sobre cada
+  commit del PR y lo fusiona con rebase.
+
+Para el historial existente, `trailers.calcular(documento, tipo, rutas,
+lector_antes, lector_despues)` sobre dos árboles (`lector_git(repo, rev)`) y
+`trailers.tipo_historico(...)` dan el mensaje sin Fuente ni Extractor;
+`trailers.formatear` lo arma.
+
 ## Al cambiar el parser
 
 - La compuerta es `auditar`: tras tu cambio no puede listar artículos que antes
@@ -65,7 +112,7 @@ API de OpenAI; es una herramienta manual opcional y la CI no la usa.
 - Prefiere un patrón general a un caso especial por artículo, y agrega una
   prueba de regresión en `tests/`.
 - Un cambio aquí modifica texto ya publicado en la siguiente vigilancia. Es lo
-  esperado; ese PR sale titulado como corrección de extracción.
+  esperado; ese commit sale como corrección de extracción (`Tipo: correccion`).
 - No relajes `verificar.py` ni pruebas existentes para que algo pase.
 
 ## Agregar un estado
