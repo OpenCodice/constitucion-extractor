@@ -75,7 +75,9 @@ API de OpenAI; es una herramienta manual opcional y la CI no la usa.
    `extractor/estados/__init__.py`.
 2. Construir en `leyes-estatales/{estado}/constitucion/` y dejar `auditar` en
    cero problemas.
-3. Marcar `LISTO = True` en su módulo y regenerar `estados.json`
+3. Regenerar la tabla del README de `leyes-estatales` con
+   `python scripts/readme_estatales.py ../leyes-estatales`.
+4. Marcar `LISTO = True` en su módulo y regenerar `estados.json`
    (`python scripts/estados_json.py`; una prueba exige que esté al día). La
    vigilancia de `leyes-estatales` toma los estados de `resolver_pdf.py
    --matriz` y constitucion.app lee `estados.json`. Un estado que no logra
