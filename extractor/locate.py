@@ -26,7 +26,7 @@ def _norm_char(ch: str) -> str:
     return base if _KEEP.fullmatch(base or "") else ""
 
 
-def _char_stream(pdf: pdfplumber.PDF, ruido: tuple = ()) -> tuple[list[dict], str]:
+def _char_stream(pdf: pdfplumber.PDF, ruido: tuple = (), filtro=None) -> tuple[list[dict], str]:
     """Flujo de caracteres relevantes (con página y bbox) + cadena normalizada.
 
     Índice i en la cadena normalizada ↔ chars[i]. Filtra líneas de encabezado y
@@ -34,6 +34,8 @@ def _char_stream(pdf: pdfplumber.PDF, ruido: tuple = ()) -> tuple[list[dict], st
     """
     chars: list[dict] = []
     for page in pdf.pages:
+        if filtro is not None:
+            page = page.filter(lambda o: o.get("object_type") != "char" or filtro(o))
         for line in page.extract_text_lines():
             t = line["text"].strip()
             if t.startswith(HEADER_PREFIXES) or PAGE_FOOTER_RE.match(t):
@@ -81,9 +83,9 @@ class Locator:
     """Alinea pasajes contra el PDF. Búsqueda monótona (los pasajes vienen en
     orden de documento), con respaldo a búsqueda global."""
 
-    def __init__(self, pdf_path: str, ruido: tuple = ()):
+    def __init__(self, pdf_path: str, ruido: tuple = (), filtro=None):
         with pdfplumber.open(pdf_path) as pdf:
-            self.chars, self.norm = _char_stream(pdf, ruido)
+            self.chars, self.norm = _char_stream(pdf, ruido, filtro)
             self.page_w = round(pdf.pages[0].width, 2)
             self.page_h = round(pdf.pages[0].height, 2)
         self._cursor = 0
@@ -115,9 +117,9 @@ class Locator:
         }
 
 
-def annotate(passages: list[dict], pdf_path: str, ruido: tuple = ()) -> list[dict]:
+def annotate(passages: list[dict], pdf_path: str, ruido: tuple = (), filtro=None) -> list[dict]:
     """Agrega `coordenadas` (best-effort) a cada pasaje. Mutar in-place."""
-    loc = Locator(pdf_path, ruido)
+    loc = Locator(pdf_path, ruido, filtro)
     for p in passages:
         p["coordenadas"] = loc.locate(p["texto"])
     return passages

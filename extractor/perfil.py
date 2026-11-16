@@ -117,6 +117,16 @@ class PerfilFuente:
 
     # --- hooks opcionales (Nivel 2) ---------------------------------------
     preprocess: Optional[Callable[[str], str]] = None
+    # Qué caracteres del PDF se leen (p. ej. fuera la marca de agua, que
+    # pdfplumber mezcla letra por letra con el texto). None = todos.
+    filtro_char: Optional[Callable[[dict], bool]] = None
+    # Fuentes que ponen la nota de reforma ANTES de lo que anota: un renglón que
+    # sea nota según esta regex y quede justo antes de "Artículo N" abre el
+    # artículo N en vez de cerrar el anterior (ver `parse_text`). None = no.
+    notas_previas: Optional[re.Pattern] = None
+    # Con `notas_previas`: también las notas antes de un bloque de encabezado
+    # (Título/Capítulo/Sección) y dentro de él van al artículo que lo cierra.
+    notas_previas_encabezado: bool = False
 
     def prefijo_id(self, base: str) -> str:
         """Id namespaced por ámbito. Federal queda SIN prefijo (compat)."""
@@ -191,6 +201,9 @@ def perfil_estatal(
                                                    # trae números de página sueltos
     version_de: Optional[Callable[[str], Optional[date]]] = None,
     preprocess: Optional[Callable[[str], str]] = None,
+    filtro_char: Optional[Callable[[dict], bool]] = None,
+    notas_previas: Optional[re.Pattern] = None,
+    notas_previas_encabezado: bool = False,
 ) -> PerfilFuente:
     """Construye un perfil estatal genérico (Nivel 1).
 
@@ -218,7 +231,8 @@ def perfil_estatal(
         titulo_re=re.compile(
             r"^T[íi]tulo\s+(Primero|Segundo|Tercero|Cuarto|Quinto|Sexto|"
             r"S[ée]ptimo|Octavo|Noveno|D[ée]cimo)\b.*$", re.IGNORECASE),
-        capitulo_re=re.compile(r"^Cap[íi]tulo\s+([IVXLC]+)(\s+Bis)?\s*$", re.IGNORECASE),
+        capitulo_re=re.compile(
+            r"^Cap[íi]tulo\s+([IVXLC]+)(\s+(?:Bis|Ter|Qu[áa]ter|(?-i:[A-Z])))?\s*$", re.IGNORECASE),
         transitorios_re=transitorios_re or re.compile(
             r"^[ \t]*(?:Art[íi]culos?\s+Transitorios?|TRANSITORIOS?)[ \t]*$",
             re.MULTILINE | re.IGNORECASE),
@@ -232,4 +246,15 @@ def perfil_estatal(
         # si el encabezado repetido se cuela en el cuerpo, que el gate lo atrape
         leak_markers=header_prefixes,
         preprocess=preprocess,
+        filtro_char=filtro_char,
+        notas_previas=notas_previas,
+        notas_previas_encabezado=notas_previas_encabezado,
     )
+
+
+def pagina(page, perfil: "PerfilFuente"):
+    """La página de pdfplumber tal como la lee este perfil (con `filtro_char`)."""
+    if perfil.filtro_char is None:
+        return page
+    filtro = perfil.filtro_char
+    return page.filter(lambda o: o.get("object_type") != "char" or filtro(o))

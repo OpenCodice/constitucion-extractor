@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Callable
 
 from .parse import extract_clean_text
-from .perfil import PerfilFuente
+from .perfil import PerfilFuente, pagina
 
 MODELO_DEFAULT = "gpt-5.4-mini"
 MODELO_FUERTE_DEFAULT = "gpt-5.5"   # segunda opinión de lo que no salga "fiel"
@@ -148,10 +148,10 @@ def cambios(out: str | Path) -> list[Cambio]:
 
 # ------------------------------------------------------------------ contexto
 
-def paginas_crudas(pdf_path: str) -> list[str]:
+def paginas_crudas(pdf_path: str, perfil: PerfilFuente | None = None) -> list[str]:
     import pdfplumber
     with pdfplumber.open(pdf_path) as pdf:
-        return [page.extract_text() or "" for page in pdf.pages]
+        return [(pagina(page, perfil) if perfil else page).extract_text() or "" for page in pdf.pages]
 
 
 def _norm(s: str) -> str:
@@ -188,7 +188,7 @@ def paginas_de(bloques: list[str], articulo: list[str], normas: list[str]) -> li
 
 # Encabezados estructurales que el parser consume como contexto, no como cuerpo.
 ENCABEZADO_RE = re.compile(
-    r"\b(?:T[íi]tulo\s+[a-záéíóú]+|Cap[íi]tulo\s+(?:[IVXLC]+|[úu]nico)(?:\s+Bis)?)\b",
+    r"\b(?:T[íi]tulo\s+[a-záéíóú]+|Cap[íi]tulo\s+(?:[IVXLC]+|[úu]nico)(?:\s+(?:Bis|Ter|Qu[áa]ter))?)\b",
     re.IGNORECASE)
 
 
@@ -212,12 +212,37 @@ class Flujo:
         return " ".join(self.texto[self.idx[a]:self.idx[b - 1] + 1].split())
 
 
+_TITULO_MD_RE = re.compile(r"^# Art[íi]culo (\d+)(?:\.(\d+))?\S* ?(.*)$", re.MULTILINE)
+
+
+def _encabezado_propio(md: str) -> re.Pattern | None:
+    """Forma normalizada del encabezado del artículo en el PDF, a partir del
+    título del .md: "articulo" (o "articulos", errata), el número, el ordinal
+    "o" opcional ("1o."), el subnúmero y el sufijo ("7a", "163quater")."""
+    m = _TITULO_MD_RE.search(md)
+    if not m:
+        return None
+    num, sub, suf = m.group(1), m.group(2) or "", _norm(m.group(3))
+    return re.compile(rf"articulos?{num}o?{sub}{suf}")
+
+
+# Bloque de encabezado entre notas previas (`notas_previas_encabezado`):
+# "CAPITULO II De los Habitantes del Estado", "TÍTULO PRIMERO", "CAPITULO III TER".
+_ESTRUCTURA_RE = re.compile(
+    r"(?:(?:T[íi]tulo|Cap[íi]tulo|Secci[óo]n)\s+[^\s.]+(?:\s+(?:Bis|Ter|Qu[áa]ter|[A-Z]))?\.?"
+    r"(?:\s+[^.;:()]{1,200}?\.?)?\s*)+", re.IGNORECASE)
+_ART_EN_HUECO_RE = re.compile(r"\bArt[íi]culos?\b", re.IGNORECASE)
+_NOTA_MD_RE = re.compile(r"_?\(.*\)\.?_?", re.DOTALL)
+MAX_HUECO_ESTRUCTURA = 600
+
+
 def cobertura(md: str, flujo: Flujo) -> list[dict]:
     """Comprobación determinista de un artículo extraído contra el PDF: cada
     párrafo debe estar literal y en orden, y entre párrafos consecutivos no
     puede quedar texto del PDF sin extraer."""
-    bloques = [n for b in md.split("\n\n")
-               if b.strip() and not b.startswith("# ") and (n := _norm(b))]
+    crudos = [b.strip() for b in md.split("\n\n")
+              if b.strip() and not b.startswith("# ") and _norm(b)]
+    bloques = [_norm(b) for b in crudos]
     unicos = [(len(b), i) for i, b in enumerate(bloques) if flujo.norma.count(b) == 1]
     if not unicos:
         # Artículo sin ningún párrafo único (p. ej. "Derogado."): solo literalidad.
@@ -227,27 +252,57 @@ def cobertura(md: str, flujo: Flujo) -> list[dict]:
     ini = flujo.norma.find(bloques[k])
     fin = ini + len(bloques[k])
     problemas: list[dict] = []
+    # Con `notas_previas` las notas que preceden al encabezado abren el artículo,
+    # así que el propio encabezado ("Artículo 7º- A.") queda entre ellas y el
+    # primer párrafo. Se tolera ese hueco, una vez, si es exactamente el
+    # encabezado de este artículo. Con `notas_previas_encabezado` entre esas
+    # notas puede quedar además un encabezado de Título/Capítulo/Sección; se
+    # tolera solo mientras todo lo anterior del artículo sean notas.
+    propio = _encabezado_propio(md)
+    tolerado = False
 
-    def hueco(a: int, b: int) -> None:
+    def solo_estructura(texto: str, antes: int) -> bool:
+        if len(texto) > MAX_HUECO_ESTRUCTURA or not all(
+                _NOTA_MD_RE.fullmatch(c) for c in crudos[:antes]):
+            return False
+        arts = list(_ART_EN_HUECO_RE.finditer(texto))
+        corte = arts[-1].start() if arts else len(texto)
+        previo, cola = texto[:corte].strip(), _norm(texto[corte:])
+        return ((not previo or bool(_ESTRUCTURA_RE.fullmatch(previo)))
+                and (not cola or bool(not tolerado and propio and propio.fullmatch(cola))))
+
+    def hueco(a: int, b: int, antes: int) -> None:
+        nonlocal tolerado
         if b - a <= MAX_HUECO:
             return
         texto = flujo.original(a, b)
-        if _norm(ENCABEZADO_RE.sub("", texto)):
-            problemas.append({"tipo": "texto_omitido", "fragmento": texto})
+        resto = _norm(ENCABEZADO_RE.sub("", texto))
+        if not resto:
+            return
+        if not tolerado and propio and propio.fullmatch(resto):
+            tolerado = True
+            return
+        if solo_estructura(texto, antes):
+            if _ART_EN_HUECO_RE.search(texto):
+                tolerado = True
+            return
+        problemas.append({"tipo": "texto_omitido", "fragmento": texto})
 
-    for b in bloques[k + 1:]:
+    for t in range(k + 1, len(bloques)):
+        b = bloques[t]
         p = flujo.norma.find(b, fin)
         if p == -1:
             problemas.append({"tipo": "no_literal", "fragmento": b[:120]})
             continue
-        hueco(fin, p)
+        hueco(fin, p, t)
         fin = p + len(b)
-    for b in reversed(bloques[:k]):
+    for t in reversed(range(k)):
+        b = bloques[t]
         p = flujo.norma.rfind(b, 0, ini)
         if p == -1:
             problemas.append({"tipo": "no_literal", "fragmento": b[:120]})
             continue
-        hueco(p + len(b), ini)
+        hueco(p + len(b), ini, t + 1)
         ini = p
     return problemas
 
@@ -381,7 +436,7 @@ def verificar(pdf_path: str, out: str | Path, perfil: PerfilFuente,
 
     Lo que `call` no dé por fiel se reevalúa con `call_fuerte` (modelo más
     capaz), cuyo veredicto es el definitivo."""
-    paginas = paginas_crudas(pdf_path)
+    paginas = paginas_crudas(pdf_path, perfil)
     normas = [_norm(p) for p in paginas]
     base = perfil
     aprendidos: list[str] = []
