@@ -32,6 +32,12 @@ está mal, se corrige aquí.
   cuyos sitios rechazan IP extranjeras (los estados con `"via": "mx"` en su
   `RESOLVER`). Se despliega a mano; ver su README.
 - `scripts/pr_summary.py` — cuerpo del PR de vigilancia.
+- `.github/workflows/vigilar-cpeum.yml` y `vigilar-estatales.yml` — la
+  vigilancia de `constitucion-mexicana` y `leyes-estatales`. Viven aquí, no en
+  los repos de datos, para que el historial de esos repos solo tenga cambios de
+  texto legal. Las lanza cada lunes el Worker `scheduler` y abren el PR en el
+  repo de datos con `PR_TOKEN`. El arreglo del agente solo puede tocar
+  `extractor/` y `tests/` (lo impone `scripts/agente/cerrar.sh`).
 - `.github/workflows/credenciales.yml` — comprobación mensual de `PR_TOKEN` y
   `CLAUDE_CODE_OAUTH_TOKEN`, las credenciales de organización que usa la
   vigilancia de todos los repos de datos.
