@@ -96,3 +96,7 @@ Para trabajar en este repo, ver [`AGENTS.md`](AGENTS.md).
 ```bash
 .venv/bin/python -m pytest -q
 ```
+
+## Licencia
+
+[MIT](LICENSE).
