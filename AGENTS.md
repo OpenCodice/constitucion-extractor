@@ -24,6 +24,10 @@ está mal, se corrige aquí.
 - `scripts/agente/` — el agente de CI: `brief.md` (su encargo), `correr.sh`
   (lo lanza) y `cerrar.sh` (compuertas deterministas, publica su arreglo).
 - `scripts/resolver_pdf.py` — URL vigente del PDF de un estado.
+- `scheduler/` — Worker de Cloudflare que lanza cada lunes la vigilancia de los
+  repos de datos (y un vigilante diario relanza la que lleve más de 8 días sin
+  correr). El cron de GitHub Actions dejó de disparar y no es confiable. Se
+  despliega a mano; ver su README.
 - `egress-mx/` — Worker de Cloudflare que descarga desde México las fuentes
   cuyos sitios rechazan IP extranjeras (los estados con `"via": "mx"` en su
   `RESOLVER`). Se despliega a mano; ver su README.

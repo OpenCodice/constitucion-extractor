@@ -1,0 +1,13 @@
+{
+  "name": "scheduler",
+  "main": "worker.js",
+  "compatibility_date": "2026-11-01",
+  // Solo corre por cron: no expone ninguna URL.
+  "workers_dev": false,
+  "preview_urls": false,
+  "triggers": {
+    // Deben coincidir con VIGILANCIAS y VIGILANTE en worker.js.
+    "crons": ["0 9 * * 1", "0 13 * * 1", "30 15 * * *"]
+  },
+  "observability": { "enabled": true }
+}
