@@ -1,0 +1,298 @@
+name: Vigilar reformas estatales
+
+# Vigila el PDF oficial de cada constitución estatal y abre un PR cuando el
+# texto vigente cambia. La detección la hace git: se regenera el texto y se
+# compara; NO se comparan bytes del PDF. Un job por estado (matriz), cada uno
+# en su propia rama → sin carreras de push.
+#
+# La URL del PDF vigente la resuelve `scripts/resolver_pdf.py` del extractor:
+#   - CDMX: URL de nombre estable (directo).
+#   - Jalisco: el PDF lleva la fecha embebida y rota en cada reforma; el
+#     resolver lee el "Listado Completo" de la biblioteca virtual y toma el más
+#     reciente.
+# Si algún estado cambia su sitio y el resolver falla, relanza a mano con el
+# input `pdf_url` (+ `estado`). La fuente de verdad sigue siendo el PDF del repo.
+#
+# Vive en el extractor, no en el repo de datos, para que el historial de
+# leyes-estatales solo tenga cambios de texto legal. Lo lanza cada lunes el Worker
+# `scheduler` (ver scheduler/); el PR se abre en leyes-estatales con PR_TOKEN.
+
+on:
+  workflow_dispatch:
+    inputs:
+      reintento:
+        description: 'Reintento automático tras una falla'
+        type: boolean
+        default: false
+      estado:
+        description: 'Limitar a un estado (vacío = todos)'
+        type: string
+        default: ''
+      pdf_url:
+        description: 'URL del PDF (override del resolver; requiere elegir estado)'
+        type: string
+        default: ''
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  EXTRACTOR_REPO: https://github.com/OpenCodice/constitucion-extractor.git
+  TIENE_CLAUDE: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+
+jobs:
+  planear:
+    runs-on: ubuntu-latest
+    outputs:
+      matriz: ${{ steps.m.outputs.matriz }}
+    steps:
+      - name: Estados con vigilancia automática (del registro del extractor)
+        id: m
+        run: |
+          git clone -q --depth 1 "$EXTRACTOR_REPO" /tmp/extractor
+          pip install -q -r /tmp/extractor/requirements.txt
+          echo "matriz=$(python3 /tmp/extractor/scripts/resolver_pdf.py --matriz)" >> "$GITHUB_OUTPUT"
+
+  vigilar:
+    needs: planear
+    # Imagen fija: la conversión del Word (estados con formato doc) depende de
+    # la versión de LibreOffice de la imagen.
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        include: ${{ fromJSON(needs.planear.outputs.matriz) }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: OpenCodice/leyes-estatales
+          token: ${{ secrets.PR_TOKEN }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Clonar extractor e instalar dependencias
+        run: |
+          git clone --depth 1 "$EXTRACTOR_REPO" /tmp/extractor
+          pip install -r /tmp/extractor/requirements.txt
+
+      - name: Resolver URL del PDF vigente
+        id: url
+        env:
+          # Solo los estados que se descargan vía México (ver egress-mx/ del
+          # extractor) reciben el token; el paso del agente nunca lo ve.
+          EGRESS_MX_TOKEN: ${{ matrix.via == 'mx' && secrets.EGRESS_MX_TOKEN || '' }}
+        run: |
+          SOLO="${{ inputs.estado }}"
+          OVERRIDE="${{ inputs.pdf_url }}"
+          if [ -n "$SOLO" ] && [ "$SOLO" != "${{ matrix.estado }}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Disparo dirigido a $SOLO; salto ${{ matrix.estado }}."
+            exit 0
+          fi
+          if [ -n "$OVERRIDE" ] && [ "$SOLO" = "${{ matrix.estado }}" ]; then
+            URL="$OVERRIDE"
+          else
+            URL="$(python /tmp/extractor/scripts/resolver_pdf.py ${{ matrix.estado }})"
+          fi
+          # Estados en vigilancia manual (resolver tipo "manual") devuelven vacío.
+          if [ -z "$URL" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${{ matrix.estado }} en vigilancia manual; sin URL automática."
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "::notice::${{ matrix.estado }} → $URL"
+
+      - name: Descargar el PDF vigente
+        if: steps.url.outputs.skip == 'false'
+        env:
+          EGRESS_MX_TOKEN: ${{ matrix.via == 'mx' && secrets.EGRESS_MX_TOKEN || '' }}
+          URL: ${{ steps.url.outputs.url }}
+        run: |
+          if [ "${{ matrix.via }}" = "mx" ]; then
+            # El sitio rechaza IP de fuera de México: se pide al Worker en México.
+            url=$(python3 -c "import sys,urllib.parse as u; print('https://egress-mx.danielcardeenas.workers.dev/?url=' + u.quote(sys.argv[1], safe=''))" "$URL")
+            curl -sSL --retry 3 --max-time 300 -H "Authorization: Bearer $EGRESS_MX_TOKEN" -o /tmp/estatal.pdf "$url"
+          else
+            # Almacén del sistema más los intermedios que algunos servidores no envían
+            # (ver certs/README.md del extractor): la cadena se valida igual.
+            cat /etc/ssl/certs/ca-certificates.crt /tmp/extractor/certs/*.pem > /tmp/ca.pem
+            curl -sSL --retry 3 -A "Mozilla/5.0" --cacert /tmp/ca.pem -o /tmp/estatal.pdf "$URL"
+          fi
+          if [ "${{ matrix.formato }}" = "doc" ]; then
+            # El estado solo publica Word: se guarda el original y el extractor lee
+            # el PDF que genera LibreOffice. Los dos quedan en fuente/.
+            mv /tmp/estatal.pdf /tmp/estatal.doc
+            head -c 8 /tmp/estatal.doc | od -An -tx1 | grep -q 'd0 cf 11 e0' \
+              || { echo "::error::${{ matrix.estado }}: la URL no devolvió un documento de Word"; exit 1; }
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq --no-install-recommends libreoffice-writer > /dev/null
+            soffice --version
+            soffice --headless --convert-to pdf --outdir /tmp/conv /tmp/estatal.doc
+            mv /tmp/conv/estatal.pdf /tmp/estatal.pdf
+          fi
+          # Algunos sitios responden 200 con una página HTML cuando el archivo ya no existe.
+          head -c 5 /tmp/estatal.pdf | grep -q '%PDF' || { echo "::error::${{ matrix.estado }}: la URL no devolvió un PDF"; exit 1; }
+
+      - name: Regenerar texto + metadata desde el PDF
+        if: steps.url.outputs.skip == 'false'
+        run: |
+          # Versión: si el PDF lleva la fecha en el nombre (…-DDMMYY.pdf, Jalisco)
+          # se pasa explícita; si no (CDMX) el extractor la saca de la portada.
+          VER=""
+          if echo "${{ steps.url.outputs.url }}" | grep -qE '\-[0-9]{6}\.pdf$'; then
+            d=$(echo "${{ steps.url.outputs.url }}" | grep -oE '[0-9]{6}\.pdf$' | cut -c1-6)
+            VER="20${d:4:2}-${d:2:2}-${d:0:2}"
+          fi
+          echo "VER=$VER" >> "$GITHUB_ENV"
+          echo "BUILD_ARGS=--url-fuente ${{ steps.url.outputs.url }} ${VER:+--version $VER}" >> "$GITHUB_ENV"
+          PYTHONPATH=/tmp/extractor python -m extractor build \
+            --pdf /tmp/estatal.pdf --out "$GITHUB_WORKSPACE/${{ matrix.dir }}" \
+            --perfil "${{ matrix.perfil }}" \
+            --url-fuente "${{ steps.url.outputs.url }}" ${VER:+--version "$VER"}
+
+      - name: Agente — verificar contra el PDF y reparar el extractor si hace falta
+        timeout-minutes: 90
+        if: env.TIENE_CLAUDE == 'true' && steps.url.outputs.skip == 'false'
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          PDF: /tmp/estatal.pdf
+          OUT: ${{ github.workspace }}/${{ matrix.dir }}
+          PERFIL: ${{ matrix.perfil }}
+        run: bash /tmp/extractor/scripts/agente/correr.sh
+
+      - name: Compuertas del agente y veredicto
+        id: agente
+        if: env.TIENE_CLAUDE == 'true' && steps.url.outputs.skip == 'false'
+        env:
+          EXTRACTOR_TOKEN: ${{ secrets.PR_TOKEN }}
+          EXTRACTOR_SLUG: OpenCodice/constitucion-extractor
+          REPORTE: /tmp/verificacion.md
+          PDF: /tmp/estatal.pdf
+          OUT: ${{ github.workspace }}/${{ matrix.dir }}
+          PERFIL: ${{ matrix.perfil }}
+        run: |
+          if bash /tmp/extractor/scripts/agente/cerrar.sh; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Veredicto de verificación
+        id: veredicto
+        run: echo "ok=${{ steps.agente.outputs.ok }}" >> "$GITHUB_OUTPUT"
+
+      - name: ¿Cambió el texto vigente?
+        if: steps.url.outputs.skip == 'false'
+        id: cambios
+        run: |
+          if [ -n "$(git status --porcelain -- "${{ matrix.dir }}")" ]; then
+            echo "hay_cambios=true" >> "$GITHUB_OUTPUT"
+            git status --short -- "${{ matrix.dir }}"
+          else
+            echo "hay_cambios=false" >> "$GITHUB_OUTPUT"
+            echo "Sin cambios: el texto vigente coincide con el repo."
+          fi
+
+      - name: Actualizar el PDF fuente (solo si hubo reforma)
+        if: steps.url.outputs.skip == 'false' && steps.cambios.outputs.hay_cambios == 'true'
+        run: |
+          cp /tmp/estatal.pdf "$GITHUB_WORKSPACE/${{ matrix.dir }}/fuente/constitucion.pdf"
+          if [ "${{ matrix.formato }}" = "doc" ]; then
+            cp /tmp/estatal.doc "$GITHUB_WORKSPACE/${{ matrix.dir }}/fuente/constitucion.doc"
+          fi
+
+      - name: Generar cuerpo del PR
+        if: steps.url.outputs.skip == 'false' && steps.cambios.outputs.hay_cambios == 'true'
+        run: |
+          {
+            echo "## 🏛️ Posible reforma — ${{ matrix.estado }} (detección automática)"
+            echo
+            echo "El texto regenerado desde el PDF oficial difiere del versionado"
+            echo "en este repositorio. PR abierto automáticamente para revisar el diff."
+            echo
+            echo "- **Fuente:** ${{ steps.url.outputs.url }}"
+            echo
+            echo "### Artículos con cambios"
+            git status --porcelain -- "${{ matrix.dir }}/articulos" | sed 's/^/ - /'
+            echo
+            echo "### Antes de aprobar"
+            echo "- Revisa el diff de \`${{ matrix.dir }}/articulos/\` contra el periódico"
+            echo "  oficial del estado — debe corresponder a una reforma real."
+          } > /tmp/cuerpo.md
+          if [ -f /tmp/verificacion.md ]; then
+            { echo; cat /tmp/verificacion.md; } >> /tmp/cuerpo.md
+          fi
+          cat /tmp/cuerpo.md
+
+      - name: Abrir Pull Request
+        id: pr
+        # Solo se publica lo verificado. Lo que no pasó las compuertas no se
+        # publica: el texto vigente se queda como está y la siguiente vigilancia
+        # lo vuelve a intentar, con el agente reparando el extractor.
+        if: steps.url.outputs.skip == 'false' && steps.cambios.outputs.hay_cambios == 'true' && steps.veredicto.outputs.ok == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          # Con un PAT (secret PR_TOKEN) el PR nace atribuido a un usuario real,
+          # así dispara `revisar-pr` (gate + resumen) como un PR humano. Si el
+          # secret no existe, cae al GITHUB_TOKEN (el PR se abre pero sin checks).
+          token: ${{ secrets.PR_TOKEN || github.token }}
+          branch: reforma/${{ matrix.estado }}-deteccion-automatica
+          base: main
+          title: '🏛️ Posible reforma — ${{ matrix.estado }} (detección automática)'
+          body-path: /tmp/cuerpo.md
+          commit-message: 'Actualización automática del texto vigente — ${{ matrix.estado }}'
+          add-paths: ${{ matrix.dir }}/**
+          labels: |
+            reforma
+            automatico
+            verificado
+            ${{ steps.agente.outputs.tipo == 'correccion' && 'correccion-extraccion' || '' }}
+          delete-branch: true
+
+      - name: Anotar lo que no se publicó
+        if: steps.cambios.outputs.hay_cambios == 'true' && steps.veredicto.outputs.ok != 'true'
+        run: |
+          {
+            echo "## Cambios no publicados"
+            echo "La extracción no pasó las compuertas; se conserva el texto vigente y la próxima vigilancia lo reintenta."
+            if [ -f /tmp/verificacion.md ]; then cat /tmp/verificacion.md; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  salud:
+    needs: [planear, vigilar]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Reintentar una vez si falló
+        # Casi todas las fallas son de red o de la fuente oficial: se reintenta
+        # solo, una vez. Si el reintento también falla, la siguiente vigilancia
+        # semanal lo vuelve a intentar.
+        if: (needs.planear.result == 'failure' || needs.vigilar.result == 'failure') && inputs.reintento != true
+        run: gh workflow run vigilar-estatales.yml -R "$GITHUB_REPOSITORY" --ref main -f reintento=true
+
+      - name: Dejar constancia si también falló el reintento
+        if: (needs.planear.result == 'failure' || needs.vigilar.result == 'failure') && inputs.reintento == true
+        run: |
+          titulo="🚨 Falló: ${{ github.workflow }}"
+          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          n=$(gh issue list -R "$GITHUB_REPOSITORY" --state open \
+                --search "in:title \"$titulo\"" --json number -q '.[0].number')
+          if [ -n "$n" ]; then
+            gh issue comment "$n" -R "$GITHUB_REPOSITORY" --body "Volvió a fallar tras reintentar: $url"
+          else
+            gh issue create -R "$GITHUB_REPOSITORY" --title "$titulo" \
+              --body "Falló dos veces seguidas; la vigilancia de la próxima semana lo reintenta: $url"
+          fi

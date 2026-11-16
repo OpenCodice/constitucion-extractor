@@ -1,0 +1,191 @@
+name: Vigilar reformas CPEUM
+
+# Vigila el PDF oficial de la Constitución y abre un PR cuando el texto vigente
+# cambia (= hubo una reforma publicada en el DOF). La detección de cambios la
+# hace git: se regenera el texto y se compara; NO se comparan bytes del PDF.
+#
+# El PR trae solo el texto + metadata (regeneración determinista y gratuita).
+#
+# Vive en el extractor, no en el repo de datos, para que el historial de
+# constitucion-mexicana solo tenga cambios de texto legal. Lo lanza cada lunes el Worker
+# `scheduler` (ver scheduler/); el PR se abre en constitucion-mexicana con PR_TOKEN.
+
+on:
+  workflow_dispatch:
+    inputs:
+      reintento:
+        description: 'Reintento automático tras una falla'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write               # crear la rama y commitear
+  pull-requests: write          # abrir el PR
+
+env:
+  # Repo del extractor (código).
+  EXTRACTOR_REPO: https://github.com/OpenCodice/constitucion-extractor.git
+  PDF_URL: https://www.diputados.gob.mx/LeyesBiblio/pdf/CPEUM.pdf
+  TIENE_CLAUDE: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+
+jobs:
+  vigilar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del repo de datos
+        uses: actions/checkout@v5
+        with:
+          repository: OpenCodice/constitucion-mexicana
+          token: ${{ secrets.PR_TOKEN }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Clonar extractor e instalar dependencias
+        run: |
+          git clone --depth 1 "$EXTRACTOR_REPO" /tmp/extractor
+          pip install -r /tmp/extractor/requirements.txt
+
+      - name: Descargar el PDF vigente
+        run: curl -sSL --retry 3 -o /tmp/CPEUM.pdf "$PDF_URL"
+
+      - name: Regenerar texto + metadata desde el PDF
+        run: |
+          cd /tmp/extractor
+          PYTHONPATH=/tmp/extractor python -m extractor build \
+            --pdf /tmp/CPEUM.pdf --out "$GITHUB_WORKSPACE"
+
+      - name: Agente — verificar contra el PDF y reparar el extractor si hace falta
+        timeout-minutes: 90
+        if: env.TIENE_CLAUDE == 'true'
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          PDF: /tmp/CPEUM.pdf
+          OUT: ${{ github.workspace }}
+          PERFIL: cpeum
+        run: bash /tmp/extractor/scripts/agente/correr.sh
+
+      - name: Compuertas del agente y veredicto
+        id: agente
+        if: env.TIENE_CLAUDE == 'true'
+        env:
+          EXTRACTOR_TOKEN: ${{ secrets.PR_TOKEN }}
+          EXTRACTOR_SLUG: OpenCodice/constitucion-extractor
+          REPORTE: /tmp/verificacion.md
+          PDF: /tmp/CPEUM.pdf
+          OUT: ${{ github.workspace }}
+          PERFIL: cpeum
+        run: |
+          if bash /tmp/extractor/scripts/agente/cerrar.sh; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Veredicto de verificación
+        id: veredicto
+        run: echo "ok=${{ steps.agente.outputs.ok }}" >> "$GITHUB_OUTPUT"
+
+      - name: ¿Cambió el texto vigente?
+        id: cambios
+        run: |
+          # Una reforma = cambió el TEXTO LEGAL de los artículos. Miramos solo
+          # `articulos/` a propósito: cambios de metadata/esquema (p. ej. un campo
+          # nuevo en pasajes.jsonl) regeneran el árbol pero NO son una reforma y
+          # no deben abrir un PR de "reforma".
+          if [ -n "$(git status --porcelain -- articulos fuente/ruido.json)" ]; then
+            echo "hay_cambios=true" >> "$GITHUB_OUTPUT"
+            git status --short -- articulos
+          else
+            echo "hay_cambios=false" >> "$GITHUB_OUTPUT"
+            echo "Sin reforma: el texto de los artículos coincide con el repo."
+            if [ -n "$(git status --porcelain)" ]; then
+              echo "Nota: hay diffs solo de metadata/esquema (no reforma):"
+              git status --short
+            fi
+          fi
+
+      - name: Actualizar el PDF fuente (solo si hubo reforma)
+        # Va en el mismo commit que las coordenadas regeneradas: PDF y datos
+        # quedan sincronizados.
+        if: steps.cambios.outputs.hay_cambios == 'true'
+        run: |
+          mkdir -p fuente
+          cp /tmp/CPEUM.pdf fuente/CPEUM.pdf
+
+      - name: Generar cuerpo del PR
+        if: steps.cambios.outputs.hay_cambios == 'true'
+        run: |
+          python /tmp/extractor/scripts/pr_summary.py "$GITHUB_WORKSPACE" > /tmp/cuerpo.md
+          if [ -f /tmp/verificacion.md ]; then
+            { echo; cat /tmp/verificacion.md; } >> /tmp/cuerpo.md
+          fi
+          cat /tmp/cuerpo.md
+
+      - name: Abrir Pull Request
+        id: pr
+        # Solo se publica lo verificado. Lo que no pasó las compuertas no se
+        # publica: el texto vigente se queda como está y la siguiente vigilancia
+        # lo vuelve a intentar, con el agente reparando el extractor.
+        if: steps.cambios.outputs.hay_cambios == 'true' && steps.veredicto.outputs.ok == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          # Con un PAT (secret PR_TOKEN) el PR nace atribuido a un usuario real,
+          # así dispara `revisar-pr` (gate + resumen) como un PR humano. Si el
+          # secret no existe, cae al GITHUB_TOKEN (el PR se abre pero sin checks).
+          token: ${{ secrets.PR_TOKEN || github.token }}
+          branch: reforma/cpeum-deteccion-automatica
+          base: main
+          title: '🏛️ Posible reforma a la CPEUM (detección automática)'
+          body-path: /tmp/cuerpo.md
+          commit-message: 'Actualización automática del texto vigente de la CPEUM'
+          labels: |
+            reforma
+            automatico
+            verificado
+            ${{ steps.agente.outputs.tipo == 'correccion' && 'correccion-extraccion' || '' }}
+          delete-branch: true
+
+      - name: Anotar lo que no se publicó
+        if: steps.cambios.outputs.hay_cambios == 'true' && steps.veredicto.outputs.ok != 'true'
+        run: |
+          {
+            echo "## Cambios no publicados"
+            echo "La extracción no pasó las compuertas; se conserva el texto vigente y la próxima vigilancia lo reintenta."
+            if [ -f /tmp/verificacion.md ]; then cat /tmp/verificacion.md; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  salud:
+    needs: vigilar
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Reintentar una vez si falló
+        # Casi todas las fallas son de red o de la fuente oficial: se reintenta
+        # solo, una vez. Si el reintento también falla, la siguiente vigilancia
+        # semanal lo vuelve a intentar.
+        if: (needs.vigilar.result == 'failure') && inputs.reintento != true
+        run: gh workflow run vigilar-cpeum.yml -R "$GITHUB_REPOSITORY" --ref main -f reintento=true
+
+      - name: Dejar constancia si también falló el reintento
+        if: (needs.vigilar.result == 'failure') && inputs.reintento == true
+        run: |
+          titulo="🚨 Falló: ${{ github.workflow }}"
+          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          n=$(gh issue list -R "$GITHUB_REPOSITORY" --state open \
+                --search "in:title \"$titulo\"" --json number -q '.[0].number')
+          if [ -n "$n" ]; then
+            gh issue comment "$n" -R "$GITHUB_REPOSITORY" --body "Volvió a fallar tras reintentar: $url"
+          else
+            gh issue create -R "$GITHUB_REPOSITORY" --title "$titulo" \
+              --body "Falló dos veces seguidas; la vigilancia de la próxima semana lo reintenta: $url"
+          fi
