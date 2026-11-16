@@ -7,13 +7,14 @@
 const ORG = "OpenCodice";
 
 // Qué se lanza y cuándo (UTC). `cron` debe estar también en wrangler.jsonc.
+// En Cloudflare el día 1 es el domingo, no el lunes: se usan abreviaturas.
 const VIGILANCIAS = [
-  { repo: "fiscal-extractor", workflow: "vigilar-fiscal.yml", cron: "0 9 * * 1" },
+  { repo: "fiscal-extractor", workflow: "vigilar-fiscal.yml", cron: "0 9 * * MON" },
   // La vigilancia vive en los extractores; cada una abre su PR en su repo de datos.
-  { repo: "constitucion-extractor", workflow: "vigilar-cpeum.yml", cron: "0 9 * * 1" },
-  { repo: "constitucion-extractor", workflow: "vigilar-estatales.yml", cron: "0 9 * * 1" },
+  { repo: "constitucion-extractor", workflow: "vigilar-cpeum.yml", cron: "0 9 * * MON" },
+  { repo: "constitucion-extractor", workflow: "vigilar-estatales.yml", cron: "0 9 * * MON" },
   // Después de la fiscal: las dos publican arreglos en fiscal-extractor.
-  { repo: "fiscal-extractor", workflow: "vigilar-federal.yml", cron: "0 13 * * 1" },
+  { repo: "fiscal-extractor", workflow: "vigilar-federal.yml", cron: "0 13 * * MON" },
 ];
 
 // El vigilante: si una vigilancia lleva más de esto sin ninguna corrida, se lanza.
