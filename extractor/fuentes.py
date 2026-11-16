@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 
+from .estados import cargar_estados
 from .perfil import CPEUM, PerfilFuente, perfil_estatal, version_ultima_reforma
 
 JALISCO = perfil_estatal(
@@ -54,6 +55,9 @@ FUENTES: dict[str, PerfilFuente] = {
     "jalisco": JALISCO,
     "cdmx": CDMX,
 }
+# El resto de los estados: un módulo por estado en `extractor/estados/`, cada uno
+# con su `PERFIL`. Así agregar o ajustar un estado no toca el de otro.
+FUENTES.update(cargar_estados())
 
 
 def perfil_por_nombre(nombre: str) -> PerfilFuente:

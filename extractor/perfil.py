@@ -51,7 +51,11 @@ def fechas_largas(text: str) -> list[date]:
     """Fechas estilo 'DD de mes de YYYY' (periódicos oficiales estatales)."""
     out: set[date] = set()
     for d, mo, y in _FECHA_LARGA_RE.findall(text):
-        out.add(date(int(y), _MESES[mo.lower()], int(d)))
+        try:
+            out.add(date(int(y), _MESES[mo.lower()], int(d)))
+        except ValueError:
+            # Erratas del propio PDF ("31 de junio"): no son una fecha que citar.
+            continue
     return sorted(out)
 
 

@@ -11,7 +11,8 @@ estatales no exponen una URL estable. Hay dos patrones:
                 índice de leyes, extraer el enlace de la Constitución y quedarse
                 con el de fecha más reciente.
 
-Solo usa la librería estándar (urllib) para no añadir dependencias al CI.
+Usa urllib (librería estándar). Importa el registro de `extractor/estados/`,
+así que necesita las dependencias del extractor instaladas.
 
 Uso:
     python scripts/resolver_pdf.py jalisco        # imprime la URL vigente
@@ -24,6 +25,7 @@ import json
 import re
 import sys
 from datetime import date
+from pathlib import Path
 from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
@@ -81,7 +83,45 @@ def elegir_mas_reciente(html: str, patron: re.Pattern, index_url: str) -> str:
 
 def _resolver_indice(cfg: dict) -> str:
     html = _fetch_text(cfg["index_url"], cfg.get("encoding", "utf-8"))
-    return elegir_mas_reciente(html, cfg["patron"], cfg["index_url"])
+    orden = cfg.get("orden", "ddmmyy")
+    if orden == "ddmmyy":
+        return elegir_mas_reciente(html, cfg["patron"], cfg["index_url"])
+    return elegir(html, cfg["patron"], cfg["index_url"], orden,
+                  cfg.get("plantilla"))
+
+
+def elegir(html: str, patron: re.Pattern, index_url: str, orden: str,
+           plantilla: str | None = None) -> str:
+    """Del índice, la URL del PDF vigente. `orden`:
+    - "unico": todas las coincidencias deben ser la misma ruta (si el índice
+      enlaza dos constituciones distintas, mejor fallar que adivinar);
+    - "yyyymmdd" / "fecha": el grupo 2 es la fecha (AAAAMMDD, o AAAA-MM-DD en
+      cualquier separador) y gana la más reciente.
+    `plantilla` arma la URL final con la ruta capturada (`{0}`). Función pura."""
+    ms = [m if isinstance(m, tuple) else (m,) for m in patron.findall(html)]
+    if not ms:
+        raise SystemExit(f"no se encontró el PDF de la Constitución en {index_url}")
+    if orden == "unico":
+        rutas = {m[0] for m in ms}
+        if len(rutas) > 1:
+            raise SystemExit(f"{index_url} enlaza {len(rutas)} PDF distintos: {sorted(rutas)[:3]}")
+        rel = ms[0][0]
+    elif orden in ("yyyymmdd", "fecha"):
+        rel = max(ms, key=lambda m: re.sub(r"\D", "", m[1]))[0]
+    else:
+        raise SystemExit(f"orden desconocido: {orden!r}")
+    url = plantilla.format(rel) if plantilla else urljoin(index_url, rel)
+    return _encode_url(url)
+
+
+def _de_los_estados() -> dict[str, dict]:
+    """Resolvers declarados en cada módulo de `extractor/estados/` (`RESOLVER`)."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from extractor.estados import resolvers_estados
+    return resolvers_estados()
+
+
+RESOLVERS.update(_de_los_estados())
 
 
 def resolver(estado: str) -> str:
@@ -95,6 +135,8 @@ def resolver(estado: str) -> str:
         return cfg["url"]
     if cfg["tipo"] == "indice":
         return _resolver_indice(cfg)
+    if cfg["tipo"] == "funcion":
+        return cfg["funcion"]()
     raise SystemExit(f"tipo de resolver desconocido: {cfg['tipo']!r}")
 
 
