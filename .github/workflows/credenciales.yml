@@ -74,6 +74,5 @@ jobs:
             gh issue comment "$n" -R "$GITHUB_REPOSITORY" --body "Volvió a fallar: $url"
           else
             gh issue create -R "$GITHUB_REPOSITORY" --title "$titulo" \
-              --assignee danielcardeenas \
               --body "Una credencial de la vigilancia venció o perdió permisos: $url"
           fi
