@@ -169,7 +169,10 @@ def main(argv: list[str]) -> int:
         # La vigilancia corre un job por estado con vigilancia automática; el
         # perfil y la carpeta llevan el mismo nombre que el estado.
         print(json.dumps([{"estado": e, "perfil": e, "dir": f"{e}/constitucion",
-                           "via": c.get("via") or ""}
+                           "via": c.get("via") or "",
+                           # "doc": el estado solo publica Word; la vigilancia lo
+                           # convierte a PDF con LibreOffice.
+                           "formato": c.get("formato") or "pdf"}
                           for e, c in RESOLVERS.items() if c["tipo"] != "manual"]))
         return 0
     if argv[0] == "--listar":
