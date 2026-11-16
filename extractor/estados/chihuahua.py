@@ -70,7 +70,7 @@ _BASE = perfil_estatal(
     ambito="chihuahua",
     clave="chh",
     nombre="Constitución Política del Estado Libre y Soberano de Chihuahua",
-    fuente="H. Congreso del Estado de Chihuahua (Biblioteca Legislativa)",
+    fuente="Periódico Oficial del Estado de Chihuahua — H. Congreso del Estado de Chihuahua",
     url_fuente=("https://www.congresochihuahua.gob.mx/biblioteca/constitucion/"
                 "archivosConstitucion/actual.pdf"),
     texto_original="1950-06-17",

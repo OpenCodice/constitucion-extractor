@@ -108,8 +108,7 @@ _BASE = perfil_estatal(
     ambito="yucatan",
     clave="yuc",
     nombre="Constitución Política del Estado de Yucatán",
-    fuente=("H. Congreso del Estado de Yucatán (Secretaría General del Poder Legislativo, "
-            "Unidad de Servicios Técnico-Legislativos)"),
+    fuente="Diario Oficial del Gobierno del Estado de Yucatán — H. Congreso del Estado de Yucatán",
     url_fuente="https://www.congresoyucatan.gob.mx/storage/documentos/constitucion.pdf",
     texto_original="1918-01-14",
     label_ordinal="plano",

@@ -54,7 +54,7 @@ _BASE = perfil_estatal(
     ambito="baja-california",
     clave="bcn",
     nombre="Constitución Política del Estado Libre y Soberano de Baja California",
-    fuente="H. Congreso del Estado de Baja California",
+    fuente="Periódico Oficial del Estado de Baja California — H. Congreso del Estado de Baja California",
     url_fuente=("https://www.congresobc.gob.mx/Documentos/ProcesoParlamentario/Leyes/"
                 "TOMO_I/20260904_CONSTBC.PDF"),
     texto_original="1953-08-16",

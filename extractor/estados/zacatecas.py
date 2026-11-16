@@ -97,7 +97,7 @@ _BASE = perfil_estatal(
     ambito="zacatecas",
     clave="zac",
     nombre="Constitución Política del Estado Libre y Soberano de Zacatecas",
-    fuente="Poder Legislativo del Estado de Zacatecas (Congreso del Estado, LXV Legislatura)",
+    fuente="Periódico Oficial del Gobierno del Estado de Zacatecas — Poder Legislativo del Estado de Zacatecas",
     url_fuente="https://www.congresozac.gob.mx/65/ley&cual=333&tipo=pdf",
     texto_original="1998-07-11",
     label_ordinal="plano",         # "Artículo 1°." pero "Artículo 10." sin ordinal
