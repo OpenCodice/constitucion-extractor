@@ -90,10 +90,11 @@ def validate(data_repo: str, base: str | None = None,
         chk(bool(idx.get("version")), "versión del PDF registrada", str(idx.get("version")))
 
     cuerpos = {p.name: p.read_text(encoding="utf-8") for p in md}
-    # Un artículo derogado tiene cuerpo legítimamente corto ("Derogado.").
+    # Un artículo derogado tiene cuerpo legítimamente corto ("Derogado.",
+    # "(DEROGADO, P.O. 1 DE OCTUBRE DE 1987)", "Se deroga.").
     truncados = [n for n, t in cuerpos.items()
                  if len((c := t.split("\n", 2)[-1].strip())) < MIN_BODY_CHARS
-                 and not re.match(r"(?i)^derogad[oa]\b", c)]
+                 and not re.match(r"(?i)^\(?(?:derogad[oa]|se deroga)\b", c)]
     chk(not truncados, "ningún artículo vacío/truncado", ", ".join(truncados[:5]))
 
     fugas = [n for n, t in cuerpos.items()

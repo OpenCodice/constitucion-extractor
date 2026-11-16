@@ -19,7 +19,9 @@ if [ ! -s "$TRABAJO/cambiados.txt" ]; then
 fi
 
 regenerar() {
-  git -C "$OUT" checkout -q -- . && git -C "$OUT" clean -fdq -- .
+  # En el alta de un estado la carpeta aún no tiene archivos versionados.
+  git -C "$OUT" checkout -q -- . 2>/dev/null || true
+  git -C "$OUT" clean -fdq -- .
   # shellcheck disable=SC2086
   python -m extractor build --pdf "$PDF" --out "$OUT" --perfil "$PERFIL" ${BUILD_ARGS:-} > /dev/null
 }
