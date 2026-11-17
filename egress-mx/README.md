@@ -10,7 +10,9 @@ conexiones de fuera del país (en su `RESOLVER`, `"via": "mx"`).
 - El token es el secret `TOKEN` del Worker y, del lado de GitHub, el secret de
   la organización `EGRESS_MX_TOKEN`. La vigilancia solo lo expone a los pasos
   de resolver y descargar, nunca al del agente.
-- Uso: `GET https://egress-mx.<cuenta>.workers.dev/?url=<URL oficial>`.
+- Uso: `GET https://egress-mx.<cuenta>.workers.dev/?url=<URL oficial>`; un
+  `POST` con cuerpo de formulario se reenvía igual (lo usa `congreso-extractor`
+  para las listas de votación de la Gaceta).
 
 Se despliega a mano (no desde CI, para no guardar credenciales de Cloudflare
 en este repo, en el que también publica el agente):

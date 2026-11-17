@@ -41,8 +41,22 @@ export default {
     if (!["https:", "http:"].includes(url.protocol) || !PERMITIDOS.has(url.hostname)) {
       return new Response(`dominio no permitido: ${url.hostname}\n`, { status: 403 });
     }
+    // POST de formulario: algunas listas oficiales (la Gaceta de Diputados) solo
+    // se obtienen enviando su formulario.
+    if (!["GET", "POST"].includes(request.method)) {
+      return new Response("método no permitido\n", { status: 405 });
+    }
+    const envio = request.method === "POST"
+      ? { method: "POST", body: await request.arrayBuffer(),
+          contentType: request.headers.get("Content-Type") ?? "application/x-www-form-urlencoded" }
+      : { method: "GET" };
     const r = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) OpenCodice" },
+      method: envio.method,
+      body: envio.body,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) OpenCodice",
+        ...(envio.contentType ? { "Content-Type": envio.contentType } : {}),
+      },
       redirect: "follow",
       signal: AbortSignal.timeout(TIEMPO_MAX),
     });
