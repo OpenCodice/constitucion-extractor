@@ -83,8 +83,7 @@ está mal, se corrige aquí.
   el resultado como commit status (`validar-externo`), solo informativo:
   `PR_TOKEN` no tiene el permiso «Commit statuses», así que la protección de
   main no puede exigirlo. El gate es que solo este job fusiona, y solo lo
-  validado. Mientras los repos de datos conserven su propio `revisar-pr.yml`,
-  los dos validan y el primero que fusiona gana.
+  validado.
 - `.github/workflows/vigilar-cpeum.yml` y `vigilar-estatales.yml` — la
   vigilancia de `constitucion-mexicana` y `leyes-estatales`. Viven aquí, no en
   los repos de datos, para que el historial de esos repos solo tenga cambios de
@@ -157,11 +156,13 @@ Extractor: OpenCodice/constitucion-extractor@e3ae3f5
 - `revisar-pr.yml` corre `scripts/validar_commits.py` sobre cada commit del PR
   y lo fusiona con rebase.
 
-El historial de los dos repos se reescribió por última vez el 2026-11-17: cada
+El historial de los dos repos se reescribió el 2026-11-17 (la final): cada
 constitución empieza en su alta y sigue solo con sus reformas reales, todas
 extraídas con el extractor de ese día desde el archivo de su `fuente/`, con
-todos los trailers (también Fuente, Fuente-Sha256 y Extractor). Desde entonces
-no se reescribe: los hashes son estables. `trailers.calcular(documento, tipo,
+todos los trailers (también Fuente, Fuente-Sha256 y Extractor). Ese mismo día
+una última reescritura solo quitó del historial la infraestructura (`.github/`,
+`AGENTS.md`, `CLAUDE.md`, `.gitignore`; ver el `AGENTS.md` raíz). Desde
+entonces no se reescribe: los hashes son estables. `trailers.calcular(documento, tipo,
 rutas, lector_antes, lector_despues)` sobre dos árboles (`lector_git(repo,
 rev)`) y `trailers.formatear` dan el mensaje de cualquier commit.
 
