@@ -89,6 +89,8 @@ RESOLVER = {
         r'href="(https://documentos\.congresoqroo\.gob\.mx/leyes/L176-[IVXL]+-(20\d{2}[01]\d[0-3]\d)-'
         r'[^"]*Constituci[^"]*\.pdf)"'),
     "encoding": "utf-8",
+    # El Congreso responde 403 a los runners de GitHub (fuera de México).
+    "via": "mx",
     "orden": "yyyymmdd",
 }
 

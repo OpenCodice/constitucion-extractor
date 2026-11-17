@@ -9,6 +9,8 @@ const PERMITIDOS = new Set([
   "legisver.gob.mx",
   "www.congresogto.gob.mx",
   "congresogto.gob.mx",
+  "www.congresoqroo.gob.mx",
+  "documentos.congresoqroo.gob.mx",
   // Votaciones nominales del Congreso de la Unión (congreso-extractor).
   "sitl.diputados.gob.mx",
   "gaceta.diputados.gob.mx",
