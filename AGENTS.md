@@ -115,8 +115,7 @@ Extractor: OpenCodice/constitucion-extractor@e3ae3f5
   anterior) y el resto, la `reforma`, que trae el PDF nuevo a `fuente/`.
   Documento nuevo → `alta`. Una corrección que no cambia el texto de ningún
   artículo (solo metadata) es `metadatos`, con título `Metadatos de <sigla>:
-  <archivos>`; los `correccion` sin artículos ya publicados no se reescriben y
-  el validador los sigue aceptando (en commits nuevos los rechaza).
+  <archivos>`; una `correccion` sin artículos la rechaza el validador.
 - `Publicacion`: fechas de reforma nuevas en la metadata (`notas`); si no hay,
   la versión de la portada (`portada`). Solo en `reforma` y `alta`.
 - `Articulos-Adicionados` / `-Modificados` / `-Derogados` en una reforma
@@ -125,10 +124,13 @@ Extractor: OpenCodice/constitucion-extractor@e3ae3f5
 - `revisar-pr` del repo de datos corre `scripts/validar_commits.py` sobre cada
   commit del PR y lo fusiona con rebase.
 
-Para el historial existente, `trailers.calcular(documento, tipo, rutas,
-lector_antes, lector_despues)` sobre dos árboles (`lector_git(repo, rev)`) y
-`trailers.tipo_historico(...)` dan el mensaje sin Fuente ni Extractor;
-`trailers.formatear` lo arma.
+El historial de los dos repos se reescribió por última vez el 2026-11-17: cada
+constitución empieza en su alta y sigue solo con sus reformas reales, todas
+extraídas con el extractor de ese día desde el archivo de su `fuente/`, con
+todos los trailers (también Fuente, Fuente-Sha256 y Extractor). Desde entonces
+no se reescribe: los hashes son estables. `trailers.calcular(documento, tipo,
+rutas, lector_antes, lector_despues)` sobre dos árboles (`lector_git(repo,
+rev)`) y `trailers.formatear` dan el mensaje de cualquier commit.
 
 ## Al cambiar el parser
 
