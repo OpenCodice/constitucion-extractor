@@ -90,3 +90,26 @@ def test_jalisco_fechas_del_articulado_no_son_reformas():
     texto = ("Artículo 52.- El 14 de junio de 2016 se instaló el Consejo.\n" + _TABLA_JAL)
     a52, _ = parse_text(texto, perfil=JALISCO)
     assert a52.reform_dates == [date(1994, 7, 13), date(2015, 7, 28)]
+
+
+def test_cdmx_denominaciones_aparte_del_texto():
+    texto = ("ARTÍCULO 70\n"
+             "DE LA NATURALEZA INTERCULTURAL, PLURIÉTNICA, PLURILINGÜE Y\n"
+             "PLURICULTURAL DE LA CIUDAD.\n"
+             "1. La Ciudad de México es intercultural.\n"
+             "ARTÍCULO 71\n"
+             "INVIOLABILIDAD CONSTITUCIONAL\n"
+             "Esta Constitución no puede ser alterada por actos de fuerza.\n"
+             "A. De la función judicial\n"
+             "El derecho a la buena administración de justicia estará garantizado.\n"
+             "B. SE DEROGA\n"
+             "(DEROGADO G.O. CDMX 26 DE JULIO DE 2019)\n")
+    a70, a71 = parse_text(CDMX.preprocess(texto), perfil=CDMX)
+    assert render_markdown(a70, perfil=CDMX).split("\n\n")[1] == (
+        "DE LA NATURALEZA INTERCULTURAL, PLURIÉTNICA, PLURILINGÜE Y PLURICULTURAL DE LA CIUDAD.")
+    assert render_markdown(a71, perfil=CDMX).split("\n\n")[1:] == [
+        "INVIOLABILIDAD CONSTITUCIONAL",
+        "Esta Constitución no puede ser alterada por actos de fuerza.",
+        "A. De la función judicial",
+        "El derecho a la buena administración de justicia estará garantizado.",
+        "B. SE DEROGA (DEROGADO G.O. CDMX 26 DE JULIO DE 2019)\n"]

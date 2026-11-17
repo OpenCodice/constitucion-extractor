@@ -187,7 +187,45 @@ def separar_notas_cdmx(texto: str) -> str:
             out += ["", nota, ""]
         if partes[-1].strip():
             out.append(partes[-1].strip())
-    return "\n".join(out)
+    return "\n".join(_denominaciones_aparte("\n".join(out).split("\n")))
+
+
+_CDMX_ARTICULO_RE = re.compile(r"^(?:ART[ÍI]CULO|Art[íi]culo)\s+\d+\s*$")
+# "A. De la función judicial": el apartado lleva denominación corta y sin punto.
+_CDMX_APARTADO_RE = re.compile(r"^[A-H]\.\s+\S.{0,75}$")
+# Una denominación sigue en el renglón siguiente si este termina en una palabra
+# que no cierra ("… DE LA" / "Ciudad.") o el siguiente empieza en minúscula.
+_CDMX_CONTINUA_RE = re.compile(r"\b(?:de|del|la|las|los|el|y|e|en|a|para|con)$", re.IGNORECASE)
+_CDMX_EMPIEZA_TEXTO_RE = re.compile(r"^[A-ZÁÉÍÓÚÑ][a-záéíóúñ]")
+
+
+def _denominaciones_aparte(lineas: list[str]) -> list[str]:
+    """La denominación del artículo ("INVIOLABILIDAD CONSTITUCIONAL") y la de
+    cada apartado ("A. De la función judicial") en su propio párrafo. No
+    terminan en punto, así que el normalizador las unía al texto que les sigue
+    cuando este no empieza con un marcador ("1.", "a)")."""
+    out: list[str] = []
+    i = 0
+    while i < len(lineas):
+        s = lineas[i].strip()
+        fin = None
+        if _CDMX_ARTICULO_RE.match(s) and i + 1 < len(lineas) and lineas[i + 1].strip():
+            fin = i + 1
+            while (fin + 1 < len(lineas) and lineas[fin + 1].strip()
+                   and (_CDMX_CONTINUA_RE.search(lineas[fin].strip())
+                        or lineas[fin + 1].strip()[0].islower())):
+                fin += 1
+        elif _CDMX_APARTADO_RE.match(s) and not re.search(r"[.;:,]$", s):
+            fin = i
+        if fin is None:
+            out.append(lineas[i])
+            i += 1
+            continue
+        out += lineas[i:fin + 1]
+        if fin + 1 < len(lineas) and _CDMX_EMPIEZA_TEXTO_RE.match(lineas[fin + 1].strip()):
+            out.append("")
+        i = fin + 1
+    return out
 
 
 def fechas_cdmx(texto: str) -> list[date]:
