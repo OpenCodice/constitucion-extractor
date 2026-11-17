@@ -48,11 +48,27 @@ def write_articles(arts: list[Article], data_repo: str, *,
             render_markdown(art, perfil=perfil), encoding="utf-8")
 
 
+def fechas_posibles(arts: list[Article], version: str | None, *,
+                    perfil: PerfilFuente = CPEUM) -> list[Article]:
+    """Los artículos con solo las fechas de reforma que pueden serlo: ni
+    anteriores al texto original ni posteriores a la versión del PDF.
+
+    En los estados las fechas salen de cualquier 'DD de mes de AAAA' del
+    cuerpo, así que también se cuelan las que cita el propio texto (los
+    decretos de 1898 que fijan el territorio de la Ciudad de México, la
+    anexión de Chiapas en 1824, un plazo de 2027 en un transitorio)."""
+    def posible(d) -> bool:
+        iso = d.isoformat()
+        return iso >= perfil.texto_original and (version is None or iso <= version)
+    return [replace(a, reform_dates=[d for d in a.reform_dates if posible(d)]) for a in arts]
+
+
 def write_metadata(
     arts: list[Article], data_repo: str, version: str | None = None,
     pdf_path: str | None = None, *, perfil: PerfilFuente = CPEUM
 ) -> None:
     """Capa 3: escribe el índice derivado en `metadata/` (no toca los .md)."""
+    arts = fechas_posibles(arts, version, perfil=perfil)
     meta_dir = Path(data_repo) / "metadata"
     meta_dir.mkdir(parents=True, exist_ok=True)
 

@@ -182,3 +182,44 @@ class TestUpdatesDiff:
         # Reconstruir sin cambios debe dar exactamente el mismo Markdown,
         # para que un rebuild sin reforma no genere "ruido" en git.
         assert render(self.BASE) == render(self.BASE)
+
+
+# --------------------------------------------------------------------------- #
+# Fechas de reforma imposibles                                                #
+# --------------------------------------------------------------------------- #
+
+class TestFechasPosibles:
+    """Una fecha que el cuerpo cita no es reforma si es anterior al texto
+    original o posterior a la versión del PDF (CDMX, art. 1: "los decretos del
+    15 y 17 de diciembre de 1898")."""
+
+    def test_reformas_json_sin_fechas_fuera_de_rango(self, tmp_path):
+        import json
+        from datetime import date
+
+        from extractor.build import write_metadata
+        from extractor.fuentes import FUENTES
+        from extractor.parse import Article
+
+        cdmx = FUENTES["cdmx"]
+        arts = [Article(number=1, body="x", label_ordinal="plano",
+                        reform_dates=[date(1898, 12, 17), date(2019, 7, 26)]),
+                Article(number=2, body="y", label_ordinal="plano",
+                        reform_dates=[date(2027, 9, 8)])]
+        write_metadata(arts, str(tmp_path), version="2019-12-10", perfil=cdmx)
+        reformas = json.loads((tmp_path / "metadata" / "reformas.json").read_text())
+        assert list(reformas) == ["2019-07-26"]
+        indice = json.loads((tmp_path / "metadata" / "articulos.json").read_text())
+        assert indice["articulos"][0]["reformas"] == ["2019-07-26"]
+        assert indice["articulos"][1]["ultima_reforma"] is None
+
+    def test_sin_version_solo_cuenta_el_texto_original(self):
+        from datetime import date
+
+        from extractor.build import fechas_posibles
+        from extractor.fuentes import FUENTES
+        from extractor.parse import Article
+
+        arts = [Article(number=1, reform_dates=[date(1824, 9, 14), date(2030, 1, 1)])]
+        assert fechas_posibles(arts, None, perfil=FUENTES["chiapas"])[0].reform_dates == \
+            [date(2030, 1, 1)]
