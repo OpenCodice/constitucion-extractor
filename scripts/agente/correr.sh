@@ -67,6 +67,16 @@ if ! git -C "$OUT" cat-file -e HEAD:./metadata/articulos.json 2>/dev/null; then
   exit 0
 fi
 
+# Si todo lo que cambió son correcciones que ya se confirmaron contra este
+# mismo PDF (impacto.yml las juzgó al entrar el cambio del extractor), no hay
+# nada nuevo que revisar.
+if python scripts/impacto.py ya-confirmadas "$(git -C "$OUT" rev-parse --show-toplevel)" \
+    --documento "$([ "$PERFIL" = cpeum ] && echo cpeum || echo "$PERFIL/constitucion")" --pdf "$PDF"; then
+  echo '{"fiel": true, "reparado": false, "resumen": "Todos los artículos cambiados son correcciones ya confirmadas contra este PDF (verificaciones/impacto/).", "unidades": []}' \
+    > "$TRABAJO/veredicto.json"
+  exit 0
+fi
+
 python - "$TRABAJO" "$EXTRACTOR" "$OUT" "$PDF" "$PERFIL" "$BUILD" <<'PY'
 import pathlib, sys
 trabajo, extractor, out, pdf, perfil, build = sys.argv[1:7]
