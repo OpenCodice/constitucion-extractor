@@ -9,6 +9,11 @@ const PERMITIDOS = new Set([
   "legisver.gob.mx",
   "www.congresogto.gob.mx",
   "congresogto.gob.mx",
+  // Votaciones nominales del Congreso de la Unión (congreso-extractor).
+  "sitl.diputados.gob.mx",
+  "gaceta.diputados.gob.mx",
+  "www.senado.gob.mx",
+  "senado.gob.mx",
 ]);
 
 const TIEMPO_MAX = 60_000;
