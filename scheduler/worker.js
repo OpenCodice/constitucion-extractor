@@ -26,6 +26,16 @@ const VIGILANCIAS = [
 const VIGILANTE = "30 15 * * *";
 const MAX_DIAS_SIN_CORRER = 8;
 
+// Rondas semanales que no son vigilancias: van con el cron diario del vigilante
+// el día indicado (getUTCDay: 0 = domingo), para no gastar otro Cron Trigger
+// (Cloudflare Free admite pocos por cuenta). El vigilante no las relanza: si
+// una no corre, la de la semana siguiente hace lo mismo.
+const RONDAS = [
+  // Ronda de expansión: suma un estado al corpus de leyes estatales si terminó
+  // la cadena de vigilancias del anterior (lo decide el propio workflow).
+  { repo: "fiscal-extractor", workflow: "expandir-estatales.yml", dia: 3 },
+];
+
 async function github(env, ruta, opciones = {}) {
   const r = await fetch(`https://api.github.com${ruta}`, {
     ...opciones,
@@ -63,8 +73,17 @@ async function vigilante(env) {
 
 export default {
   async scheduled(evento, env) {
-    if (evento.cron === VIGILANTE) return vigilante(env);
-    const toca = VIGILANCIAS.filter((v) => v.cron === evento.cron);
+    const dia = new Date(evento.scheduledTime).getUTCDay();
+    const toca = evento.cron === VIGILANTE
+      ? RONDAS.filter((r) => r.dia === dia)
+      : VIGILANCIAS.filter((v) => v.cron === evento.cron);
+    if (evento.cron === VIGILANTE) {
+      try {
+        await vigilante(env);
+      } catch (e) {
+        console.error(e);
+      }
+    }
     // Una falla no detiene las demás; queda en los logs del Worker.
     const resultados = await Promise.allSettled(toca.map((v) => lanzar(env, v, `cron ${evento.cron}`)));
     for (const r of resultados) if (r.status === "rejected") console.error(r.reason);

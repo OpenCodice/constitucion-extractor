@@ -9,6 +9,12 @@ repos públicos, se apaga tras 60 días sin commits.
   horario debe estar también en `triggers.crons` de `wrangler.jsonc`.
 - Vigilante diario (15:30 UTC): si una vigilancia lleva más de 8 días sin
   ninguna corrida, la lanza.
+- `RONDAS`: workflows semanales que no son vigilancias y van con ese mismo cron
+  diario el día indicado, para no gastar otro Cron Trigger. Hoy, la ronda de
+  expansión de las leyes estatales (`expandir-estatales.yml` de
+  fiscal-extractor), los miércoles. El vigilante no las relanza: cada ronda
+  decide sola si le toca trabajar y, si una no corre, la siguiente hace lo
+  mismo.
 - No expone URL. Los registros están en Workers Logs del panel de Cloudflare.
 - Token: secret `GITHUB_TOKEN`, un fine-grained PAT `opencodice-scheduler` de
   la organización OpenCodice con solo Actions: read and write (todos los

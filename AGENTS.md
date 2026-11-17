@@ -51,8 +51,10 @@ está mal, se corrige aquí.
   no envían; los usan el resolver y la descarga de la vigilancia.
 - `scheduler/` — Worker de Cloudflare que lanza cada lunes la vigilancia de los
   repos de datos (y un vigilante diario relanza la que lleve más de 8 días sin
-  correr). El cron de GitHub Actions dejó de disparar y no es confiable. Se
-  despliega a mano; ver su README.
+  correr), y cada miércoles, con el mismo cron diario (`RONDAS`), la ronda de
+  expansión de las leyes estatales (`expandir-estatales.yml` de
+  fiscal-extractor). El cron de GitHub Actions dejó de disparar y no es
+  confiable. Se despliega a mano; ver su README.
 - `egress-mx/` — Worker de Cloudflare que descarga desde México las fuentes
   cuyos sitios rechazan IP extranjeras (los estados con `"via": "mx"` en su
   `RESOLVER`). Se despliega a mano; ver su README.
@@ -93,8 +95,9 @@ está mal, se corrige aquí.
 - `leyes-estatales` también guarda las demás leyes de cada estado
   (`{estado}/{ley}/`, `fuentes.json`), que produce y vigila fiscal-extractor
   (`vigilar-leyes-estatales.yml`, ver su AGENTS.md). Esta vigilancia solo toca
-  `{estado}/constitucion/` y el README; `scripts/readme_estatales.py` lista esas
-  leyes en la tabla. Los trailers de los dos se validan con
+  `{estado}/constitucion/`. `scripts/readme_estatales.py` regenera las tablas
+  del README (estados, con esas leyes, y automatización, entre sus marcas); lo
+  corre `vigilar-leyes-estatales.yml` y va en su commit `Tipo: indice`. Los trailers de los dos se validan con
   `scripts/validar_commits.py` (Documento `<estado>/<clave>`), y cualquier PR
   de `leyes-estatales` pasa por `validar_pr.sh` completo: constituciones y
   leyes.
@@ -198,8 +201,8 @@ rev)`) y `trailers.formatear` dan el mensaje de cualquier commit.
    lo revisa entero contra el PDF, por bloques (`scripts/revision.py`), y solo
    se da de alta sin hallazgos. Puedes adelantarlo con
    `python scripts/revision.py planear …` y revisar tú los bloques.
-3. Regenerar la tabla del README de `leyes-estatales` con
-   `python scripts/readme_estatales.py ../leyes-estatales`.
+3. La tabla del README de `leyes-estatales` la regenera la siguiente
+   vigilancia de las leyes estatales (`scripts/readme_estatales.py`).
 4. Marcar `LISTO = True` en su módulo y regenerar `estados.json`
    (`python scripts/estados_json.py`; una prueba exige que esté al día). La
    vigilancia de `leyes-estatales` toma los estados de `resolver_pdf.py
