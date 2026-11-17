@@ -19,14 +19,6 @@ const VIGILANCIAS = [
   { repo: "congreso-extractor", workflow: "actualizar-congreso.yml", cron: "0 18 * * MON" },
 ];
 
-// Las páginas de constitucion.app se generan de los repos de datos y de las
-// corridas. Cada vigilancia avisa a la web al terminar (repository_dispatch);
-// este despliegue diario cubre lo que cambia solo con el tiempo (una vigilancia
-// atrasada) y cualquier aviso perdido. No entra al vigilante.
-const DESPLIEGUES = [
-  { repo: "constitucion-web", workflow: "deploy.yml", cron: "23 6 * * *" },
-];
-
 // El vigilante: si una vigilancia lleva más de esto sin ninguna corrida, se lanza.
 const VIGILANTE = "30 15 * * *";
 const MAX_DIAS_SIN_CORRER = 8;
@@ -69,7 +61,7 @@ async function vigilante(env) {
 export default {
   async scheduled(evento, env) {
     if (evento.cron === VIGILANTE) return vigilante(env);
-    const toca = [...VIGILANCIAS, ...DESPLIEGUES].filter((v) => v.cron === evento.cron);
+    const toca = VIGILANCIAS.filter((v) => v.cron === evento.cron);
     // Una falla no detiene las demás; queda en los logs del Worker.
     const resultados = await Promise.allSettled(toca.map((v) => lanzar(env, v, `cron ${evento.cron}`)));
     for (const r of resultados) if (r.status === "rejected") console.error(r.reason);
