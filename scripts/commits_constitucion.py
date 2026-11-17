@@ -12,10 +12,16 @@ PDF nuevo. El tipo del commit sale de la causa, nunca del agente
   texto nuevo es la reforma, que trae el PDF nuevo a `fuente/`;
 - documento que no existía → alta.
 
+Si la corrección no toca el texto de ningún artículo es `metadatos`. Con
+`--verificadas`, una corrección solo se publica si cada artículo que cambia
+está confirmado como mejora en el registro de `scripts/impacto.py`; si no, el
+documento no se publica en esta corrida (ni su reforma, que se construyó con
+el mismo extractor) y queda como estaba.
+
 Uso:
   commits_constitucion.py <repo> --documento cpeum|<estado>/constitucion \\
       --perfil P --pdf NUEVO.pdf [--doc NUEVO.doc] --url URL [--version V] \\
-      [--extractor-dir D]
+      [--extractor-dir D] [--verificadas verificaciones/impacto]
 
 `--doc`: el estado publica Word; su sha256 es el de la fuente y se guarda junto
 al PDF convertido. `--version`: la versión se pasó explícita al extractor (la
@@ -35,6 +41,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import impacto  # noqa: E402
 import trailers as tr  # noqa: E402
 
 EXTRACTOR = Path(__file__).resolve().parent.parent
@@ -75,6 +82,8 @@ def _articulos_cambiados(repo: str, documento: str) -> bool:
 def commit(repo: str, documento: str, tipo: str, *, fuente: str, sha: str, extractor: str,
            separacion: str | None = None) -> str:
     rutas = cambios(repo, documento)
+    if tipo == "correccion":
+        tipo = tr.tipo_sin_reforma(documento, rutas, tr.lector_git(repo, "HEAD"), tr.lector_fs(repo))
     msg = tr.mensaje(documento, tipo, rutas, tr.lector_git(repo, "HEAD"), tr.lector_fs(repo),
                      fuente=fuente, fuente_sha256=sha, extractor=extractor,
                      separacion=separacion)
@@ -114,6 +123,26 @@ def _restaurar(repo: str, documento: str, origen: Path) -> None:
             shutil.copytree(origen / rel, Path(repo) / rel)
 
 
+def sin_confirmar(repo: str, documento: str, pdf_sha: str, registro: dict | None) -> list[str]:
+    """Artículos de la corrección que hay ahora en el árbol que el registro no
+    confirma como mejora (vacío si no se exige)."""
+    if registro is None:
+        return []
+    corregidos = tr.cambios_de_articulos(documento, cambios(repo, documento),
+                                         tr.lector_git(repo, "HEAD"), tr.lector_fs(repo))
+    return impacto.faltantes(registro, documento, pdf_sha, corregidos)
+
+
+def retener(repo: str, documento: str, faltan: list[str]) -> None:
+    _git(repo, "checkout", "-q", "HEAD", "--", *rutas_documento(documento), check=False)
+    _git(repo, "clean", "-fdq", "--", *rutas_documento(documento))
+    print(f"retenido: la corrección de {documento} no está confirmada contra el PDF "
+          f"(arts. {', '.join(faltan[:12])}); no se publica en esta corrida")
+    if os.environ.get("GITHUB_OUTPUT"):
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+            fh.write("retenido=true\n")
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("repo")
@@ -125,7 +154,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--version", default=None)
     ap.add_argument("--extractor-dir", default=str(EXTRACTOR))
     ap.add_argument("--extractor-repo", default="constitucion-extractor")
+    ap.add_argument("--verificadas", default=None,
+                    help="registro de correcciones confirmadas (scripts/impacto.py)")
     a = ap.parse_args(argv)
+    registro = impacto.cargar(a.verificadas) if a.verificadas else None
 
     repo, doc = a.repo, a.documento
     raiz = raiz_documento(repo, doc)
@@ -159,10 +191,15 @@ def main(argv: list[str] | None = None) -> int:
         hechos.append(commit(repo, doc, "reforma", fuente=a.url, sha=nuevo_sha,
                              extractor=extractor, separacion="no-disponible"))
     elif viejo_sha == nuevo_sha:
-        hechos.append(commit(repo, doc, "correccion", fuente=a.url, sha=nuevo_sha,
-                             extractor=extractor))
+        faltan = sin_confirmar(repo, doc, viejo_sha, registro)
+        if faltan:
+            retener(repo, doc, faltan)
+        else:
+            hechos.append(commit(repo, doc, "correccion", fuente=a.url, sha=nuevo_sha,
+                                 extractor=extractor))
     else:
         separacion = None
+        faltan = []
         with tempfile.TemporaryDirectory() as tmp:
             final = Path(tmp) / "final"
             _guardar(repo, doc, final)
@@ -175,18 +212,24 @@ def main(argv: list[str] | None = None) -> int:
             url_vieja = json.loads(pasajes).get("url_fuente") if pasajes.strip() else None
             if construir(raiz, str(pdf_viejo), a.perfil, url_vieja,
                          idx.get("version") if a.version else None):
-                if _articulos_cambiados(repo, doc):
+                faltan = sin_confirmar(repo, doc, viejo_sha, registro)
+                if _articulos_cambiados(repo, doc) and not faltan:
                     hechos.append(commit(repo, doc, "correccion", fuente=url_vieja or a.url,
                                          sha=viejo_sha, extractor=extractor))
             else:
                 separacion = "no-disponible"
             _restaurar(repo, doc, final)
-        traer_fuente()
-        hechos.append(commit(repo, doc, "reforma", fuente=a.url, sha=nuevo_sha,
-                             extractor=extractor, separacion=separacion))
+        if faltan:
+            # La reforma salió del mismo extractor: tampoco se publica.
+            retener(repo, doc, faltan)
+        else:
+            traer_fuente()
+            hechos.append(commit(repo, doc, "reforma", fuente=a.url, sha=nuevo_sha,
+                                 extractor=extractor, separacion=separacion))
     if os.environ.get("GITHUB_OUTPUT"):
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
             fh.write(f"tipo={'reforma' if {'reforma', 'alta'} & set(hechos) else 'correccion'}\n")
+            fh.write(f"commits={len(hechos)}\n")
     return 0
 
 

@@ -22,7 +22,26 @@ está mal, se corrige aquí.
 - `extractor/verificar.py` — fidelidad contra el PDF: `cobertura` (cada párrafo
   literal en el PDF y sin texto omitido entre párrafos) y `auditar`.
 - `scripts/agente/` — el agente de CI: `brief.md` (su encargo), `correr.sh`
-  (lo lanza) y `cerrar.sh` (compuertas deterministas, publica su arreglo).
+  (lo lanza) y `cerrar.sh` (compuertas deterministas en dos fases:
+  `compuertas` sin secretos y `publicar`, que sube su arreglo). En un alta,
+  `brief-revision.md` (revisión completa por bloques). `impacto.sh` +
+  `brief-impacto.md`: el agente que solo juzga si cada corrección es mejora.
+  `publicar_registro.sh` sube a main los registros de `verificaciones/`.
+- `scripts/impacto.py` — registro de correcciones confirmadas
+  (`verificaciones/impacto/*.jsonl`: documento, artículo, sha256 del PDF y del
+  texto antes y después, veredicto), su exigencia sobre los commits de una
+  vigilancia (`pendientes-commits`, `cerrar`, `exigir`) y el agrupado de
+  cambios iguales para que el agente revise pocos.
+- `scripts/impacto_corpus.py` — reconstruye todas las constituciones
+  publicadas desde su `fuente/` con el extractor en disco y lista cada
+  artículo que cambiaría (y regresiones de cobertura).
+- `scripts/revision.py` — revisión completa de un alta: bloques de artículos
+  con el texto crudo de sus páginas, y el resultado en
+  `verificaciones/altas/*.jsonl` (no se vuelve a pagar con el mismo PDF y
+  extractor).
+- `.github/workflows/impacto.yml` — en cada push a main que toca `extractor/`
+  (un commit a mano incluido) mide su impacto en todo lo publicado y confirma
+  las correcciones con el agente.
 - `scripts/resolver_pdf.py` — URL vigente del PDF de un estado.
 - `scheduler/` — Worker de Cloudflare que lanza cada lunes la vigilancia de los
   repos de datos (y un vigilante diario relanza la que lleve más de 8 días sin
@@ -33,10 +52,14 @@ está mal, se corrige aquí.
   `RESOLVER`). Se despliega a mano; ver su README.
 - `scripts/pr_summary.py` — cuerpo del PR de vigilancia.
 - `scripts/commits_constitucion.py` — hace el commit (o los dos) del documento
-  regenerado, con sus trailers; `scripts/trailers.py` los calcula y
+  regenerado, con sus trailers (con `--verificadas`, no publica un documento
+  cuya corrección no esté confirmada); `scripts/trailers.py` los calcula y
   `scripts/validar_commits.py` los comprueba en `revisar-pr` de cada repo de
-  datos. `trailers.py` y `validar_commits.py` existen idénticos en
-  `fiscal-extractor` (y `tests/test_trailers.py`): un cambio se hace en los dos.
+  datos. `trailers.py`, `validar_commits.py`, `impacto.py`, `revision.py`,
+  `agente/impacto.sh`, `agente/brief-impacto.md`, `agente/brief_revision.py` y
+  `agente/publicar_registro.sh` existen idénticos en `fiscal-extractor` (y
+  `tests/test_trailers.py`, `tests/test_impacto.py`): un cambio se hace en los
+  dos.
 - `.github/workflows/vigilar-cpeum.yml` y `vigilar-estatales.yml` — la
   vigilancia de `constitucion-mexicana` y `leyes-estatales`. Viven aquí, no en
   los repos de datos, para que el historial de esos repos solo tenga cambios de
@@ -90,7 +113,10 @@ Extractor: OpenCodice/constitucion-extractor@e3ae3f5
   reconstruye el PDF de `fuente/` con el extractor actual: lo que eso cambia
   respecto de lo publicado es un primer commit `correccion` (con la fuente
   anterior) y el resto, la `reforma`, que trae el PDF nuevo a `fuente/`.
-  Documento nuevo → `alta`.
+  Documento nuevo → `alta`. Una corrección que no cambia el texto de ningún
+  artículo (solo metadata) es `metadatos`, con título `Metadatos de <sigla>:
+  <archivos>`; los `correccion` sin artículos ya publicados no se reescriben y
+  el validador los sigue aceptando (en commits nuevos los rechaza).
 - `Publicacion`: fechas de reforma nuevas en la metadata (`notas`); si no hay,
   la versión de la portada (`portada`). Solo en `reforma` y `alta`.
 - `Articulos-Adicionados` / `-Modificados` / `-Derogados` en una reforma
@@ -111,8 +137,19 @@ lector_antes, lector_despues)` sobre dos árboles (`lector_git(repo, rev)`) y
   (`fuente/CPEUM.pdf`, `{estado}/constitucion/fuente/constitucion.pdf`).
 - Prefiere un patrón general a un caso especial por artículo, y agrega una
   prueba de regresión en `tests/`.
-- Un cambio aquí modifica texto ya publicado en la siguiente vigilancia. Es lo
-  esperado; ese commit sale como corrección de extracción (`Tipo: correccion`).
+- Un cambio aquí modifica texto ya publicado, y eso solo se publica como
+  corrección (`Tipo: correccion`) si cada artículo que cambia está confirmado
+  como mejora contra el PDF en `verificaciones/impacto/`. Al llegar a main,
+  `impacto.yml` reconstruye todas las constituciones publicadas, lista lo que
+  cambia y el agente lo juzga; lo rechazado o sin juzgar no se publica (la
+  vigilancia rehace sus commits sin esa corrección y deja el documento como
+  estaba). Antes de hacer push, corre `python scripts/impacto_corpus.py
+  --trabajo /tmp/impacto --cpeum ../constitucion-mexicana --estatales
+  ../leyes-estatales` (unos 2 min) y mira lo que cambia: lo que no sea mejora
+  no debe entrar.
+- Un arreglo del agente en la vigilancia pasa por lo mismo antes de entrar: si
+  algo de lo que cambia en el corpus empeora o no se puede confirmar, se
+  descarta entero.
 - No relajes `verificar.py` ni pruebas existentes para que algo pase.
 
 ## Agregar un estado
@@ -121,7 +158,10 @@ lector_antes, lector_despues)` sobre dos árboles (`lector_git(repo, rev)`) y
    `PERFIL` y su `RESOLVER`; el slug es el de `ENTIDADES` en
    `extractor/estados/__init__.py`.
 2. Construir en `leyes-estatales/{estado}/constitucion/` y dejar `auditar` en
-   cero problemas.
+   cero problemas. Su primera vigilancia no lo publica solo con eso: el agente
+   lo revisa entero contra el PDF, por bloques (`scripts/revision.py`), y solo
+   se da de alta sin hallazgos. Puedes adelantarlo con
+   `python scripts/revision.py planear …` y revisar tú los bloques.
 3. Regenerar la tabla del README de `leyes-estatales` con
    `python scripts/readme_estatales.py ../leyes-estatales`.
 4. Marcar `LISTO = True` en su módulo y regenerar `estados.json`

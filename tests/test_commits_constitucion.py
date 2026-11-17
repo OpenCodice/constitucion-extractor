@@ -103,3 +103,52 @@ def test_correccion_y_reforma_separadas(repo, tmp_path):
 def test_mismo_pdf_es_correccion(repo, tmp_path):
     commits = _regenerar_y_commit(repo, tmp_path, "001|Una lectrua.\n002|Dos.\n", "2026-09-01")
     assert [t for t, _ in commits] == ["Corrección de extracción jalisco: art. 1"]
+
+
+def test_solo_metadata_es_metadatos(repo, tmp_path):
+    pdf = repo / DOC / "fuente" / "constitucion.pdf"
+    base = _git(repo, "rev-parse", "HEAD").strip()
+    meta = repo / DOC / "metadata" / "articulos.json"
+    meta.write_text(json.dumps({"fuente": "Periódico Oficial del Estado de Jalisco — otro",
+                                "version": "2026-09-01", "articulos": []}))
+    cc.main([str(repo), "--documento", DOC, "--perfil", "jalisco", "--pdf", str(pdf),
+             "--url", "https://x/vieja.pdf",
+             "--extractor-dir", str(Path(__file__).resolve().parent.parent)])
+    assert vc.main(str(repo), base) == 0
+    _, t = tr.parsear(_git(repo, "log", "-1", "--format=%B"))
+    assert tr.valor(t, "Tipo") == "metadatos"
+    assert _git(repo, "log", "-1", "--format=%s").strip() == "Metadatos de jalisco: articulos.json"
+
+
+def _con_registro(repo, tmp_path, pdf_texto, version, registro):
+    pdf = tmp_path / "nuevo.pdf"
+    pdf.write_text(pdf_texto)
+    _escribir(repo / DOC, str(pdf), version, corregir=True)
+    base = _git(repo, "rev-parse", "HEAD").strip()
+    cc.main([str(repo), "--documento", DOC, "--perfil", "jalisco", "--pdf", str(pdf),
+             "--url", "https://x/nueva.pdf", "--version", version,
+             "--extractor-dir", str(Path(__file__).resolve().parent.parent),
+             "--verificadas", str(registro)])
+    return base
+
+
+def test_correccion_sin_confirmar_no_se_publica(repo, tmp_path):
+    base = _con_registro(repo, tmp_path, "001|Una lectrua.\n002|Dos reformado.\n",
+                         "2026-10-29", tmp_path / "registro")
+    assert _git(repo, "rev-parse", "HEAD").strip() == base
+    assert not _git(repo, "status", "--porcelain")
+
+
+def test_correccion_confirmada_se_publica(repo, tmp_path):
+    im = cc.impacto
+    antes = (repo / DOC / "articulos" / "001.md").read_text()
+    viejo = (repo / DOC / "fuente" / "constitucion.pdf").read_bytes()
+    entrada = {"documento": DOC, "clave": "001", "pdf": tr.sha256_bytes(viejo),
+               "antes": im.huella(antes), "despues": im.huella(antes.replace("lectrua", "lectura")),
+               "veredicto": "mejora"}
+    im.escribir([entrada], tmp_path / "registro", "prueba")
+    base = _con_registro(repo, tmp_path, "001|Una lectrua.\n002|Dos reformado.\n",
+                         "2026-10-29", tmp_path / "registro")
+    assert len(_git(repo, "rev-list", f"{base}..HEAD").split()) == 2
+    assert im.main(["exigir", str(repo), "--base", base,
+                    "--registro", str(tmp_path / "registro")]) == 0

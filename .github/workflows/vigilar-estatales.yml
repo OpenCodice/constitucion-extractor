@@ -174,7 +174,28 @@ jobs:
           PERFIL: ${{ matrix.perfil }}
         run: bash /tmp/extractor/scripts/agente/correr.sh
 
-      - name: Compuertas del agente y veredicto
+      - name: Compuertas del arreglo del agente
+        # Sin secretos: pruebas, cobertura e impacto del arreglo en todas las
+        # constituciones publicadas.
+        id: compuertas
+        if: env.TIENE_CLAUDE == 'true' && steps.url.outputs.skip == 'false'
+        env:
+          PDF: /tmp/estatal.pdf
+          OUT: ${{ github.workspace }}/${{ matrix.dir }}
+          PERFIL: ${{ matrix.perfil }}
+        run: |
+          bash /tmp/extractor/scripts/agente/cerrar.sh compuertas
+          echo "arreglo=$(python3 -c 'import json; print(json.load(open("/tmp/agente/arreglo.json"))["estado"])' 2>/dev/null || echo ninguno)" >> "$GITHUB_OUTPUT"
+
+      - name: Agente — confirmar el impacto del arreglo en el corpus
+        if: steps.compuertas.outputs.arreglo == 'impacto'
+        timeout-minutes: 120
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          IMPACTO: /tmp/agente/impacto-arreglo
+        run: bash /tmp/extractor/scripts/agente/impacto.sh
+
+      - name: Publicar el arreglo y veredicto
         id: agente
         if: env.TIENE_CLAUDE == 'true' && steps.url.outputs.skip == 'false'
         env:
@@ -185,7 +206,7 @@ jobs:
           OUT: ${{ github.workspace }}/${{ matrix.dir }}
           PERFIL: ${{ matrix.perfil }}
         run: |
-          if bash /tmp/extractor/scripts/agente/cerrar.sh; then
+          if bash /tmp/extractor/scripts/agente/cerrar.sh publicar; then
             echo "ok=true" >> "$GITHUB_OUTPUT"
           else
             echo "ok=false" >> "$GITHUB_OUTPUT"
@@ -242,19 +263,71 @@ jobs:
         run: |
           git config user.name "${{ github.actor }}"
           git config user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
+          echo "base=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           args=()
           [ "${{ matrix.formato }}" = "doc" ] && args+=(--doc /tmp/estatal.doc)
           [ -n "$VER" ] && args+=(--version "$VER")
-          PYTHONPATH=/tmp/extractor python /tmp/extractor/scripts/commits_constitucion.py "$GITHUB_WORKSPACE" \
-            --documento "${{ matrix.dir }}" --perfil "${{ matrix.perfil }}" \
-            --pdf /tmp/estatal.pdf --url "$URL" "${args[@]}"
+          # El mismo comando, guardado: si alguna corrección no queda
+          # confirmada, se rehacen los commits con --verificadas.
+          printf '%q ' env PYTHONPATH=/tmp/extractor python /tmp/extractor/scripts/commits_constitucion.py \
+            "$GITHUB_WORKSPACE" --documento "${{ matrix.dir }}" --perfil "${{ matrix.perfil }}" \
+            --pdf /tmp/estatal.pdf --url "$URL" "${args[@]}" > /tmp/commits.sh
+          bash /tmp/commits.sh
+
+      - name: Correcciones por confirmar
+        # Una corrección (mismo PDF, otro extractor) solo se publica si cada
+        # artículo que cambia está confirmado como mejora en el registro del
+        # extractor (scripts/impacto.py). Lo que falte lo juzga el agente.
+        id: correcciones
+        if: steps.commits.outcome == 'success'
+        run: |
+          python /tmp/extractor/scripts/impacto.py pendientes-commits "$GITHUB_WORKSPACE" \
+            --base "${{ steps.commits.outputs.base }}" --trabajo /tmp/agente/impacto-vigilancia --pdf-dir /tmp \
+            --veredicto-agente /tmp/agente/veredicto.json \
+            --extractor "OpenCodice/constitucion-extractor@$(git -C /tmp/extractor rev-parse HEAD)"
+
+      - name: Agente — confirmar las correcciones
+        if: steps.correcciones.outputs.pendientes == 'true' && env.TIENE_CLAUDE == 'true'
+        timeout-minutes: 90
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          IMPACTO: /tmp/agente/impacto-vigilancia
+        run: bash /tmp/extractor/scripts/agente/impacto.sh
+
+      - name: Registrar y exigir las correcciones confirmadas
+        id: exigir
+        if: steps.commits.outcome == 'success'
+        env:
+          EXTRACTOR_TOKEN: ${{ secrets.PR_TOKEN }}
+          EXTRACTOR_SLUG: OpenCodice/constitucion-extractor
+        run: |
+          if [ "${{ steps.correcciones.outputs.pendientes }}" = true ]; then
+            python /tmp/extractor/scripts/impacto.py cerrar --trabajo /tmp/agente/impacto-vigilancia \
+              --extractor "OpenCodice/constitucion-extractor@$(git -C /tmp/extractor rev-parse HEAD)" \
+              --reporte /tmp/agente/impacto-vigilancia.md || true
+          fi
+          bash /tmp/extractor/scripts/agente/publicar_registro.sh "Correcciones verificadas de ${{ matrix.dir }}"
+          python /tmp/extractor/scripts/impacto.py exigir "$GITHUB_WORKSPACE" \
+            --base "${{ steps.commits.outputs.base }}" || true
+
+      - name: Rehacer los commits sin las correcciones no confirmadas
+        if: steps.exigir.outputs.rehacer == 'true'
+        run: |
+          git reset -q --mixed "${{ steps.commits.outputs.base }}"
+          bash -c "$(cat /tmp/commits.sh) --verificadas /tmp/extractor/verificaciones/impacto"
+          [ -f /tmp/agente/impacto-vigilancia.md ] && cat /tmp/agente/impacto-vigilancia.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: ¿Quedó algo que publicar?
+        id: publicable
+        if: steps.commits.outcome == 'success'
+        run: echo "si=$([ "$(git rev-list --count "${{ steps.commits.outputs.base }}..HEAD")" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
       - name: Abrir Pull Request
         id: pr
         # Solo se publica lo verificado. Lo que no pasó las compuertas no se
         # publica: el texto vigente se queda como está y la siguiente vigilancia
         # lo vuelve a intentar, con el agente reparando el extractor.
-        if: steps.url.outputs.skip == 'false' && steps.cambios.outputs.hay_cambios == 'true' && steps.veredicto.outputs.ok == 'true'
+        if: steps.publicable.outputs.si == 'true'
         uses: peter-evans/create-pull-request@v7
         with:
           # Con un PAT (secret PR_TOKEN) el PR nace atribuido a un usuario real,
