@@ -352,9 +352,8 @@ jobs:
         if: steps.publicable.outputs.si == 'true'
         uses: peter-evans/create-pull-request@v7
         with:
-          # Con un PAT (secret PR_TOKEN) el PR nace atribuido a un usuario real,
-          # así dispara `revisar-pr` (gate + resumen) como un PR humano. Si el
-          # secret no existe, cae al GITHUB_TOKEN (el PR se abre pero sin checks).
+          # Con un PAT (secret PR_TOKEN) el PR nace atribuido a un usuario real.
+          # Si el secret no existe, cae al GITHUB_TOKEN y el PR no se fusiona.
           token: ${{ secrets.PR_TOKEN || github.token }}
           branch: reforma/${{ matrix.estado }}-deteccion-automatica
           base: main
@@ -377,8 +376,46 @@ jobs:
             if [ -f /tmp/verificacion.md ]; then cat /tmp/verificacion.md; fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+  prs:
+    # Los PR de esta vigilancia abiertos en leyes-estatales (uno por estado, y
+    # los que hayan quedado de una corrida anterior): la matriz no junta las
+    # salidas de sus jobs.
+    needs: vigilar
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    outputs:
+      lista: ${{ steps.prs.outputs.lista }}
+    steps:
+      - id: prs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          lista=$(gh pr list -R OpenCodice/leyes-estatales --state open --limit 100 \
+            --json number,headRefName,isCrossRepository \
+            -q '[.[] | select((.isCrossRepository | not) and (.headRefName | test("^reforma/.+-deteccion-automatica$"))) | .number | tostring]')
+          echo "lista=$lista" >> "$GITHUB_OUTPUT"
+          echo "PR por revisar: $lista"
+
+  revisar:
+    # Valida cada PR en un job sin secretos y, si pasó y quedó verificado, lo
+    # fusiona (revisar-pr.yml).
+    needs: prs
+    if: ${{ !cancelled() && needs.prs.outputs.lista != '' && needs.prs.outputs.lista != '[]' }}
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        pr: ${{ fromJson(needs.prs.outputs.lista) }}
+    uses: ./.github/workflows/revisar-pr.yml
+    with:
+      repo: OpenCodice/leyes-estatales
+      pr: ${{ matrix.pr }}
+      prefijo: reforma/
+    secrets:
+      PR_TOKEN: ${{ secrets.PR_TOKEN }}
+
   salud:
-    needs: [planear, vigilar]
+    needs: [planear, vigilar, revisar]
     if: always()
     runs-on: ubuntu-latest
     permissions:
@@ -391,11 +428,11 @@ jobs:
         # Casi todas las fallas son de red o de la fuente oficial: se reintenta
         # solo, una vez. Si el reintento también falla, la siguiente vigilancia
         # semanal lo vuelve a intentar.
-        if: (needs.planear.result == 'failure' || needs.vigilar.result == 'failure') && inputs.reintento != true
+        if: (needs.planear.result == 'failure' || needs.vigilar.result == 'failure' || needs.revisar.result == 'failure') && inputs.reintento != true
         run: gh workflow run vigilar-estatales.yml -R "$GITHUB_REPOSITORY" --ref main -f reintento=true
 
       - name: Dejar constancia si también falló el reintento
-        if: (needs.planear.result == 'failure' || needs.vigilar.result == 'failure') && inputs.reintento == true
+        if: (needs.planear.result == 'failure' || needs.vigilar.result == 'failure' || needs.revisar.result == 'failure') && inputs.reintento == true
         run: |
           titulo="🚨 Falló: ${{ github.workflow }}"
           url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
@@ -411,8 +448,8 @@ jobs:
       - name: Avisar a la web
         # constitucion.app genera /estado, /leyes y la bitácora de los repos de datos
         # y de estas corridas, así que se redespliega en cuanto termina una
-        # vigilancia, haya fallado o no. Antes se espera a que `revisar-pr` fusione
-        # los PR que abrió (unos minutos), para que la web ya los incluya.
+        # vigilancia, haya fallado o no. Después de `revisar` (y, por si acaso,
+        # de que no quede un PR abierto), para que la web ya incluya lo fusionado.
         if: always()
         env:
           GH_TOKEN: ${{ secrets.PR_TOKEN }}

@@ -30,7 +30,7 @@ jobs:
           done
           exit $falla
 
-      - name: PR_TOKEN — crear rama, archivo de workflow, PR y commit status (y deshacerlo)
+      - name: PR_TOKEN — crear rama, archivo de workflow y PR (y deshacerlo)
         env:
           GH_TOKEN: ${{ secrets.PR_TOKEN }}
         run: |
@@ -43,14 +43,16 @@ jobs:
           contenido=$(printf 'name: prueba\non: workflow_dispatch\njobs:\n  x:\n    runs-on: ubuntu-latest\n    steps:\n      - run: "true"\n' | base64 -w0)
           commit=$(gh api -X PUT "repos/$repo/contents/.github/workflows/_prueba-credenciales.yml" \
             -f message="Prueba de credenciales" -f content="$contenido" -f branch="$rama" -q .commit.sha)
-          # El check `validar` que exige main en los repos de datos lo publica
-          # la vigilancia como commit status con este token (revisar-pr.yml).
+          # revisar-pr.yml publica su resultado como commit status con este
+          # token. Hoy no es obligatorio (main de los repos de datos no exige
+          # ese check), así que sin el permiso solo se avisa.
           gh api -X POST "repos/$repo/statuses/$commit" -f state=success \
-            -f context=prueba-credenciales -f description="Prueba de credenciales" > /dev/null
+            -f context=prueba-credenciales -f description="Prueba de credenciales" > /dev/null \
+            || echo "::warning::PR_TOKEN no puede publicar commit statuses (permiso «Commit statuses»)."
           pr=$(gh api -X POST "repos/$repo/pulls" -f title="Prueba de credenciales (se cierra sola)" \
             -f head="$rama" -f base=main -q .number)
           gh api -X PATCH "repos/$repo/pulls/$pr" -f state=closed > /dev/null
-          echo "Contents, Workflows, Pull requests y Commit statuses: OK (PR #$pr creado y cerrado)"
+          echo "Contents, Workflows y Pull requests: OK (PR #$pr creado y cerrado)"
 
       - name: CLAUDE_CODE_OAUTH_TOKEN — el agente responde
         env:
