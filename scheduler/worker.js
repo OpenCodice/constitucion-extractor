@@ -19,11 +19,12 @@ const VIGILANCIAS = [
   { repo: "congreso-extractor", workflow: "actualizar-congreso.yml", cron: "0 18 * * MON" },
 ];
 
-// Las páginas de constitucion.app (/estado, /leyes) se generan de los repos de
-// datos y de estas corridas en cada despliegue; se regeneran cada tres horas
-// para que reflejen reintentos y reformas recientes. No entran al vigilante.
+// Las páginas de constitucion.app se generan de los repos de datos y de las
+// corridas. Cada vigilancia avisa a la web al terminar (repository_dispatch);
+// este despliegue diario cubre lo que cambia solo con el tiempo (una vigilancia
+// atrasada) y cualquier aviso perdido. No entra al vigilante.
 const DESPLIEGUES = [
-  { repo: "constitucion-web", workflow: "deploy.yml", cron: "23 */3 * * *" },
+  { repo: "constitucion-web", workflow: "deploy.yml", cron: "23 6 * * *" },
 ];
 
 // El vigilante: si una vigilancia lleva más de esto sin ninguna corrida, se lanza.
