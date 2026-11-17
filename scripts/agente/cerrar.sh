@@ -39,8 +39,11 @@ regenerar() {
   # En el alta de un estado la carpeta aún no tiene archivos versionados.
   git -C "$OUT" checkout -q -- . 2>/dev/null || true
   git -C "$OUT" clean -fdq -- .
+  rm -f "$TRABAJO/regenerar-fallo"
+  # Un build que falla deja el repo a medias: no se publica (ver publicar).
   # shellcheck disable=SC2086
-  python -m extractor build --pdf "$PDF" --out "$OUT" --perfil "$PERFIL" ${BUILD_ARGS:-} > /dev/null
+  python -m extractor build --pdf "$PDF" --out "$OUT" --perfil "$PERFIL" ${BUILD_ARGS:-} > /dev/null \
+    || { echo "::error::No se pudo regenerar el repo de datos."; touch "$TRABAJO/regenerar-fallo"; }
 }
 
 estado_arreglo() {
@@ -119,7 +122,9 @@ PY
   cat "$TRABAJO/impacto-arreglo.log"
   case "$rc" in
     0) estado_arreglo listo ;;
-    1) estado_arreglo impacto ;;
+    # 1 es "hay correcciones por verificar" solo si dejó qué verificar.
+    1) if [ -s "$IMPACTO/pendientes.json" ]; then estado_arreglo impacto
+       else descartar "la medición del impacto falló sin dejar qué verificar"; fi ;;
     *) descartar "en el resto del corpus: $(grep '^✗' "$TRABAJO/impacto-arreglo.log" | head -3 | tr '\n' ' ')" ;;
   esac
 }
@@ -177,8 +182,15 @@ publicar() {
       revision="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["motivo"])' "$TRABAJO/revision/previa.json") (revisión anterior con el mismo PDF y extractor)"
     else
       revision="$(python scripts/revision.py cerrar --repo "$RAIZ" --documento "$DOC" --pdf "$PDF" \
-        --trabajo "$TRABAJO/revision")" && revision=""
+        --trabajo "$TRABAJO/revision")"
+      rc=$?
       revision="${revision#✗ }"
+      # Solo el 0 es una revisión sin hallazgos; un cierre que falla no lo es.
+      if [ "$rc" = 0 ]; then
+        revision=""
+      elif [ "$rc" != 2 ] || [ -z "$revision" ]; then
+        revision="no se pudo cerrar su revisión completa (código $rc)"
+      fi
       bash scripts/agente/publicar_registro.sh \
         "Revisión completa de $DOC: $([ -z "$revision" ] && echo 'sin hallazgos' || echo 'con hallazgos, no se publica')"
     fi
@@ -188,7 +200,8 @@ publicar() {
   fi
 
   ok=false
-  if [ "$cobertura_ok" -eq 0 ] && [ "$fiel" = "true" ] && [ -z "$motivo_descarte" ]; then
+  if [ "$cobertura_ok" -eq 0 ] && [ "$fiel" = "true" ] && [ -z "$motivo_descarte" ] \
+      && [ ! -e "$TRABAJO/regenerar-fallo" ]; then
     ok=true
   fi
 
