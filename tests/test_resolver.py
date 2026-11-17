@@ -67,3 +67,13 @@ def test_via_mx_arma_la_url_del_worker(monkeypatch):
     url, cab = resolver_pdf.via_mx("https://legislacion.edomex.gob.mx/a b.pdf")
     assert url.startswith(resolver_pdf.EGRESS_MX + "?url=https%3A%2F%2F")
     assert cab == {"Authorization": "Bearer t"}
+
+
+def test_cdmx_toma_el_unico_pdf_de_la_consejeria():
+    cdmx = resolver_pdf.RESOLVERS["cdmx"]
+    html = ('<a href="/images/leyes/leyes/LEY_ORGANICA_DEL_CONGRESO_6.2.pdf">ley</a>'
+            '<a href="/images/leyes/estatutos/CONSTITUCION_POLITICA_DE_LA_CDMX_14.7.pdf">'
+            'vigente</a>')
+    url = resolver_pdf.elegir(html, cdmx["patron"], cdmx["index_url"], cdmx["orden"])
+    assert url == ("https://data.consejeria.cdmx.gob.mx/images/leyes/estatutos/"
+                   "CONSTITUCION_POLITICA_DE_LA_CDMX_14.7.pdf")

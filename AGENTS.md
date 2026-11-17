@@ -10,7 +10,8 @@ está mal, se corrige aquí.
 
 - `extractor/perfil.py` — `PerfilFuente`: todo lo que varía entre un PDF y otro
   (regex de artículo, encabezados y pies de página, estilo de ordinal, cómo se
-  leen las fechas de reforma). `CPEUM` es el perfil federal.
+  leen las fechas de reforma: de las notas del texto con `fechas_de`, o de una
+  tabla aparte con `reformas_de`, como Jalisco). `CPEUM` es el perfil federal.
 - `extractor/fuentes.py` — registro de perfiles: `cpeum`, `jalisco`, `cdmx` y
   los de `extractor/estados/` (un módulo por estado).
 - `extractor/parse.py` — texto limpio del PDF → lista de `Article`.
@@ -42,7 +43,10 @@ está mal, se corrige aquí.
 - `.github/workflows/impacto.yml` — en cada push a main que toca `extractor/`
   (un commit a mano incluido) mide su impacto en todo lo publicado y confirma
   las correcciones con el agente.
-- `scripts/resolver_pdf.py` — URL vigente del PDF de un estado.
+- `scripts/resolver_pdf.py` — URL vigente del PDF de un estado. CDMX sale de
+  la Consejería Jurídica (data.consejeria.cdmx.gob.mx), no del Congreso, cuyo
+  PDF se quedó en 2019. `certs/` guarda los intermedios TLS que algunos sitios
+  no envían; los usan el resolver y la descarga de la vigilancia.
 - `scheduler/` — Worker de Cloudflare que lanza cada lunes la vigilancia de los
   repos de datos (y un vigilante diario relanza la que lleve más de 8 días sin
   correr). El cron de GitHub Actions dejó de disparar y no es confiable. Se

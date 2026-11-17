@@ -4,7 +4,7 @@
 El problema que resuelve: a diferencia del DOF federal (URL fija), los congresos
 estatales no exponen una URL estable. Hay dos patrones:
 
-  - "directo":  el PDF vive en una URL con nombre estable (p.ej. CDMX). Se
+  - "directo":  el PDF vive en una URL con nombre estable. Se
                 devuelve tal cual.
   - "indice":   el PDF lleva la FECHA embebida en el nombre y rota en cada
                 reforma (p.ej. Jalisco: ...-DDMMYY.pdf). Hay que leer la página
@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import ssl
 import sys
 from datetime import date
 from pathlib import Path
@@ -35,14 +36,17 @@ _UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
 
 # estado → cómo encontrar su PDF vigente.
 RESOLVERS: dict[str, dict] = {
-    # CDMX: el Congreso publica el texto vigente en una URL de nombre estable
-    # (más limpia que el PDF del piloto, que salía de una URL hash que rota). El
-    # perfil `cdmx` ya la parsea limpio (números de página y cola de decretos
-    # tratados), así que se vigila automático.
+    # CDMX: la Consejería Jurídica y de Servicios Legales publica el texto
+    # vigente (el del Congreso, en una URL de nombre estable, se quedó en la
+    # edición de 2019). Su nombre lleva un número de edición que cambia en cada
+    # reforma ("..._CDMX_14.7.pdf"), así que se lee de la página de la
+    # Constitución, que enlaza solo al vigente.
     "cdmx": {
-        "tipo": "directo",
-        "url": ("https://www.congresocdmx.gob.mx/archivos/legislativas/"
-                "constitucion_politica_de_la_ciudad_de_mexico.pdf"),
+        "tipo": "indice",
+        "index_url": "https://data.consejeria.cdmx.gob.mx/index.php/leyes/constitucion",
+        "orden": "unico",
+        "patron": re.compile(
+            r'href="([^"]*/CONSTITUCION_POLITICA_DE_LA_CDMX[^"/]*\.pdf)"', re.IGNORECASE),
     },
     # Jalisco: el PDF lleva la fecha (DDMMYY) en el nombre y rota en cada
     # reforma. El "Listado Completo" de la biblioteca virtual enlaza al vigente.
@@ -72,13 +76,22 @@ def via_mx(url: str) -> tuple[str, dict]:
     return f"{EGRESS_MX}?url={quote(url, safe='')}", {"Authorization": f"Bearer {token}"}
 
 
+def _contexto_tls() -> ssl.SSLContext:
+    """Almacén del sistema más los intermedios de `certs/` que algunos sitios no
+    envían (ver certs/README.md); la cadena se sigue validando hasta una raíz."""
+    ctx = ssl.create_default_context()
+    for pem in sorted((Path(__file__).resolve().parent.parent / "certs").glob("*.pem")):
+        ctx.load_verify_locations(cafile=str(pem))
+    return ctx
+
+
 def _fetch_text(url: str, encoding: str, via: str | None = None) -> str:
     headers = {"User-Agent": _UA}
     if via == "mx":
         url, extra = via_mx(url)
         headers.update(extra)
     req = Request(url, headers=headers)
-    with urlopen(req, timeout=90) as r:               # nosec: URL fija de config
+    with urlopen(req, timeout=90, context=_contexto_tls()) as r:   # nosec: URL fija de config
         return r.read().decode(encoding, errors="replace")
 
 

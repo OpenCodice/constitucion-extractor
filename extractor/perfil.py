@@ -127,6 +127,10 @@ class PerfilFuente:
     # Con `notas_previas`: también las notas antes de un bloque de encabezado
     # (Título/Capítulo/Sección) y dentro de él van al artículo que lo cierra.
     notas_previas_encabezado: bool = False
+    # Fuentes que listan las reformas aparte del articulado (una tabla al final)
+    # en vez de anotarlas en él: del texto completo, clave de artículo → fechas.
+    # Se suman a las de `fechas_de`.
+    reformas_de: Optional[Callable[[str], dict[str, list[date]]]] = None
 
     def prefijo_id(self, base: str) -> str:
         """Id namespaced por ámbito. Federal queda SIN prefijo (compat)."""
@@ -204,6 +208,7 @@ def perfil_estatal(
     filtro_char: Optional[Callable[[dict], bool]] = None,
     notas_previas: Optional[re.Pattern] = None,
     notas_previas_encabezado: bool = False,
+    reformas_de: Optional[Callable[[str], dict[str, list[date]]]] = None,
 ) -> PerfilFuente:
     """Construye un perfil estatal genérico (Nivel 1).
 
@@ -249,6 +254,7 @@ def perfil_estatal(
         filtro_char=filtro_char,
         notas_previas=notas_previas,
         notas_previas_encabezado=notas_previas_encabezado,
+        reformas_de=reformas_de,
     )
 
 

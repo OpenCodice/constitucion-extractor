@@ -333,4 +333,8 @@ def parse_text(clean_text: str, start: int = 1, *,
             idx_cuerpo.append(i)
 
     flush(current)
+    if perfil.reformas_de is not None:
+        tabla = perfil.reformas_de(clean_text)
+        for art in articles:
+            art.reform_dates = sorted(set(art.reform_dates) | set(tabla.get(art.key, ())))
     return articles
