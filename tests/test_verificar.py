@@ -110,3 +110,17 @@ def test_cobertura_detecta_texto_que_no_esta_en_el_pdf():
 def test_cobertura_ignora_encabezados_de_capitulo():
     f = Flujo.de("Artículo 5. Texto único del quinto.\nCapítulo II\nCierre único del quinto.")
     assert cobertura(_md("Texto único del quinto.", "Cierre único del quinto."), f) == []
+
+
+def test_sin_llm_la_cobertura_cubre_todos_los_cambiados(monkeypatch, tmp_path):
+    import extractor.verificar as vf
+    cambios = [vf.Cambio(f"{i:03d}", "", f"# Artículo {i}\n\nTexto {i}.\n")
+               for i in range(1, vf.MAX_ARTICULOS + 6)]
+    monkeypatch.setattr(vf, "cambios", lambda out: cambios)
+    monkeypatch.setattr(vf, "paginas_crudas", lambda pdf, perfil: [])
+    monkeypatch.setattr(vf, "extract_clean_text", lambda pdf, perfil=None: "")
+    monkeypatch.setattr(vf, "cobertura", lambda texto, flujo: [])
+    monkeypatch.setattr(vf, "cargar_ruido", lambda out: [])
+    from extractor.perfil import CPEUM
+    r = vf.verificar("x.pdf", tmp_path, CPEUM, None)
+    assert len(r.veredictos) == len(cambios) and r.ok

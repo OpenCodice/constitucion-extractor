@@ -461,8 +461,11 @@ def verificar(pdf_path: str, out: str | Path, perfil: PerfilFuente,
                                         + ("" if v.veredicto == "fiel" else v.explicacion))
             return v
 
+        # El tope es de costo del LLM; la comprobación determinista sola cubre
+        # todos los artículos cambiados.
+        revisar = todos if call is None else todos[:MAX_ARTICULOS]
         with ThreadPoolExecutor(max_workers=6) as pool:
-            veredictos = list(pool.map(evaluar, todos[:MAX_ARTICULOS]))
+            veredictos = list(pool.map(evaluar, revisar))
         lineas = [l for v in veredictos for l in v.lineas_ruido
                   if not _ya_descartada(l, perfil)]
         ya = set(p.pattern for p in cargar_ruido(out))
