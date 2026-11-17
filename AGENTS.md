@@ -38,8 +38,10 @@ está mal, se corrige aquí.
   artículo que cambiaría (y regresiones de cobertura).
 - `scripts/revision.py` — revisión completa de un alta: bloques de artículos
   con el texto crudo de sus páginas, y el resultado en
-  `verificaciones/altas/*.jsonl` (no se vuelve a pagar con el mismo PDF y
-  extractor).
+  `verificaciones/altas/*.jsonl` con cada hallazgo (no se vuelve a pagar con el
+  mismo PDF y extractor). En fiscal-extractor, esos hallazgos los toma la
+  reparación autónoma de las leyes federales y estatales; aquí el agente de la
+  vigilancia ya repara el extractor cuando la extracción tiene un defecto.
 - `.github/workflows/impacto.yml` — en cada push a main que toca `extractor/`
   (un commit a mano incluido) mide su impacto en todo lo publicado y confirma
   las correcciones con el agente.
