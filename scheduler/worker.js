@@ -15,6 +15,9 @@ const VIGILANCIAS = [
   { repo: "constitucion-extractor", workflow: "vigilar-estatales.yml", cron: "0 9 * * MON" },
   // Después de la fiscal: las dos publican arreglos en fiscal-extractor.
   { repo: "fiscal-extractor", workflow: "vigilar-federal.yml", cron: "0 13 * * MON" },
+  // Las demás leyes de cada estado; el agente no repara el extractor aquí, así que
+  // no compite con la federal por fiscal-extractor.
+  { repo: "fiscal-extractor", workflow: "vigilar-leyes-estatales.yml", cron: "0 13 * * MON" },
   // Al final: liga los decretos con los commits de reforma que dejaron las anteriores.
   { repo: "congreso-extractor", workflow: "actualizar-congreso.yml", cron: "0 18 * * MON" },
 ];
