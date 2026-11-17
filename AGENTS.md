@@ -70,6 +70,12 @@ está mal, se corrige aquí.
   texto legal. Las lanza cada lunes el Worker `scheduler` y abren el PR en el
   repo de datos con `PR_TOKEN`. El arreglo del agente solo puede tocar
   `extractor/` y `tests/` (lo impone `scripts/agente/cerrar.sh`).
+- `leyes-estatales` también guarda las demás leyes de cada estado
+  (`{estado}/{ley}/`, `fuentes.json`), que produce y vigila fiscal-extractor
+  (`vigilar-leyes-estatales.yml`, ver su AGENTS.md). Esta vigilancia solo toca
+  `{estado}/constitucion/` y el README; `scripts/readme_estatales.py` lista esas
+  leyes en la tabla. Los trailers de los dos se validan con
+  `scripts/validar_commits.py` de aquí (Documento `<estado>/<clave>`).
 - `.github/workflows/credenciales.yml` — comprobación mensual de `PR_TOKEN` y
   `CLAUDE_CODE_OAUTH_TOKEN`, las credenciales de organización que usa la
   vigilancia de todos los repos de datos.

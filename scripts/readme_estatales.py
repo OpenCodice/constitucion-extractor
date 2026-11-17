@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Regenera la tabla de estados del README de leyes-estatales desde sus carpetas
-{estado}/constitucion/. Uso: readme_estatales.py <ruta a leyes-estatales>
+{estado}/constitucion/ y, para las demás leyes de cada estado, desde su
+fuentes.json (lo escribe la vigilancia de fiscal-extractor). Uso:
+readme_estatales.py <ruta a leyes-estatales>
 
 Solo reemplaza el bloque entre `ESTADOS:INICIO` y `ESTADOS:FIN`. La tabla no
 lleva cifras que cambien con cada reforma (artículos, fechas), para que los PR
@@ -31,14 +33,23 @@ NOMBRES = {
 
 
 def tabla(REPO: Path) -> str:
-    filas = ["| Estado | Carpeta | Publicada por |", "|---|---|---|"]
+    fuentes = REPO / "fuentes.json"
+    leyes: dict[str, list[str]] = {}
+    for d in (json.loads(fuentes.read_text(encoding="utf-8"))["documentos"]
+              if fuentes.exists() else []):
+        if d.get("estado") == "incluida":
+            leyes.setdefault(d["clave"].split("/")[0], []).append(
+                f"[{d.get('sigla') or d['clave']}]({d['clave']}/)")
+    filas = ["| Estado | Carpeta | Publicada por | Otras leyes |", "|---|---|---|---|"]
     presentes = []
     for d in sorted(REPO.glob("*/constitucion/metadata/articulos.json")):
         slug = d.parts[-4]
         meta = json.loads(d.read_text(encoding="utf-8"))
         presentes.append(slug)
         fuente = (meta.get("fuente") or "").replace("|", "\\|")
-        filas.append(f"| {NOMBRES.get(slug, slug)} | [`{slug}/constitucion/`]({slug}/constitucion/) | {fuente} |")
+        otras = ", ".join(sorted(leyes.get(slug, []))) or "—"
+        filas.append(f"| {NOMBRES.get(slug, slug)} | [`{slug}/constitucion/`]({slug}/constitucion/) "
+                     f"| {fuente} | {otras} |")
     faltan = [n for s, n in NOMBRES.items() if s not in presentes]
     nota = (f"\n\nFaltan {len(faltan)}: {', '.join(sorted(faltan))}. Por qué, en "
             "[constitucion.app/leyes](https://constitucion.app/leyes#estados).") if faltan else ""
