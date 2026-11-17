@@ -23,14 +23,14 @@ jobs:
         run: |
           [ -n "$GH_TOKEN" ] || { echo "::error::Falta el secret PR_TOKEN"; exit 1; }
           falla=0
-          for r in constitucion-extractor fiscal-extractor constitucion-mexicana leyes-estatales fiscal-mexicano; do
+          for r in constitucion-extractor fiscal-extractor constitucion-mexicana leyes-estatales fiscal-mexicano leyes-federales; do
             push=$(gh api "repos/OpenCodice/$r" -q .permissions.push 2> /dev/null || echo error)
             echo "$r: push=$push"
             [ "$push" = "true" ] || falla=1
           done
           exit $falla
 
-      - name: PR_TOKEN — crear rama, archivo de workflow y PR (y deshacerlo)
+      - name: PR_TOKEN — crear rama, archivo de workflow, PR y commit status (y deshacerlo)
         env:
           GH_TOKEN: ${{ secrets.PR_TOKEN }}
         run: |
@@ -41,12 +41,16 @@ jobs:
           gh api -X POST "repos/$repo/git/refs" -f ref="refs/heads/$rama" -f sha="$sha" > /dev/null
           trap 'gh api -X DELETE "repos/$repo/git/refs/heads/$rama" > /dev/null || true' EXIT
           contenido=$(printf 'name: prueba\non: workflow_dispatch\njobs:\n  x:\n    runs-on: ubuntu-latest\n    steps:\n      - run: "true"\n' | base64 -w0)
-          gh api -X PUT "repos/$repo/contents/.github/workflows/_prueba-credenciales.yml" \
-            -f message="Prueba de credenciales" -f content="$contenido" -f branch="$rama" > /dev/null
+          commit=$(gh api -X PUT "repos/$repo/contents/.github/workflows/_prueba-credenciales.yml" \
+            -f message="Prueba de credenciales" -f content="$contenido" -f branch="$rama" -q .commit.sha)
+          # El check `validar` que exige main en los repos de datos lo publica
+          # la vigilancia como commit status con este token (revisar-pr.yml).
+          gh api -X POST "repos/$repo/statuses/$commit" -f state=success \
+            -f context=prueba-credenciales -f description="Prueba de credenciales" > /dev/null
           pr=$(gh api -X POST "repos/$repo/pulls" -f title="Prueba de credenciales (se cierra sola)" \
             -f head="$rama" -f base=main -q .number)
           gh api -X PATCH "repos/$repo/pulls/$pr" -f state=closed > /dev/null
-          echo "Contents, Workflows y Pull requests: OK (PR #$pr creado y cerrado)"
+          echo "Contents, Workflows, Pull requests y Commit statuses: OK (PR #$pr creado y cerrado)"
 
       - name: CLAUDE_CODE_OAUTH_TOKEN — el agente responde
         env:
