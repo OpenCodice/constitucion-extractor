@@ -92,16 +92,27 @@ export default {
       ? { method: "POST", body: await request.arrayBuffer(),
           contentType: request.headers.get("Content-Type") ?? "application/x-www-form-urlencoded" }
       : { method: "GET" };
-    const r = await fetch(url, {
-      method: envio.method,
-      body: envio.body,
-      headers: {
-        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) OpenCodice",
-        ...(envio.contentType ? { "Content-Type": envio.contentType } : {}),
-      },
-      redirect: "follow",
-      signal: AbortSignal.timeout(TIEMPO_MAX),
-    });
+    let r;
+    try {
+      r = await fetch(url, {
+        method: envio.method,
+        body: envio.body,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) OpenCodice",
+          ...(envio.contentType ? { "Content-Type": envio.contentType } : {}),
+        },
+        redirect: "follow",
+        signal: AbortSignal.timeout(TIEMPO_MAX),
+      });
+    } catch (e) {
+      // Quien llama necesita saber que falló la fuente y no el Worker; el
+      // detalle de la excepción se queda en los registros.
+      console.error(`${url.hostname}: ${e?.name}: ${e?.message}`);
+      const causa = e?.name === "TimeoutError"
+        ? `no respondió en ${TIEMPO_MAX / 1000} s`
+        : "no aceptó la conexión";
+      return new Response(`la fuente ${url.hostname} ${causa}\n`, { status: 502 });
+    }
     // Una redirección fuera de la lista no se sigue: el contenido debe venir de
     // la fuente oficial.
     if (!dominios.has(new URL(r.url).hostname)) {

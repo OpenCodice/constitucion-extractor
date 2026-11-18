@@ -135,7 +135,14 @@ jobs:
           if [ "${{ matrix.via }}" = "mx" ]; then
             # El sitio rechaza IP de fuera de México: se pide al Worker en México.
             url=$(python3 -c "import sys,urllib.parse as u; print('https://egress-mx.danielcardeenas.workers.dev/?url=' + u.quote(sys.argv[1], safe=''))" "$URL")
-            curl -sSL --retry 3 --max-time 300 -H "Authorization: Bearer $EGRESS_MX_TOKEN" -o /tmp/estatal.pdf "$url"
+            codigo=$(curl -sSL --retry 3 --max-time 300 -H "Authorization: Bearer $EGRESS_MX_TOKEN" -o /tmp/estatal.pdf -w '%{http_code}' "$url")
+            # El Worker contesta sus propios errores (token, dominio fuera de la
+            # lista, fuente caída) con un texto corto: esa es la causa, no el PDF.
+            if [ "${codigo: -3}" != 200 ]; then
+              causa=$(head -c 300 /tmp/estatal.pdf | tr '\r\n' '  ')
+              echo "::error::${{ matrix.estado }}: la descarga por egress-mx terminó con HTTP ${codigo: -3}: $causa"
+              exit 1
+            fi
           else
             # Almacén del sistema más los intermedios que algunos servidores no envían
             # (ver certs/README.md del extractor): la cadena se valida igual.
