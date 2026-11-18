@@ -5,8 +5,17 @@ vigilancia de `leyes-estatales` para los estados cuyos sitios rechazan
 conexiones de fuera del país (en su `RESOLVER`, `"via": "mx"`).
 
 - Solo atiende peticiones con `Authorization: Bearer <token>` y solo hacia los
-  dominios de `PERMITIDOS` en `worker.js`; para sumar un estado, agrega su
-  dominio ahí y vuelve a desplegar.
+  dominios de su lista: `PERMITIDOS` en `worker.js` más los `dominios` de
+  `permitidos.json`, que el Worker lee de main de este repo
+  (raw.githubusercontent.com, cada 2 minutos; si no puede leerlo, sigue con la
+  última lista que leyó o, si no, con `PERMITIDOS`). Del archivo solo acepta
+  dominios `.mx`.
+- Sumar un dominio no requiere desplegar: basta un commit a `permitidos.json`.
+  La ronda de expansión de `fiscal-extractor` lo hace sola (con `PR_TOKEN`)
+  cuando el sitio de un estado no responde desde GitHub Actions y el dominio
+  es oficial (`.gob.mx`, o `.mx` del mismo dominio que la constitución del
+  estado; `scripts/expansion.py egress-agregar`). Un dominio que no sea `.mx`
+  sí va en `PERMITIDOS` y pide desplegar.
 - El token es el secret `TOKEN` del Worker y, del lado de GitHub, el secret de
   la organización `EGRESS_MX_TOKEN`. La vigilancia solo lo expone a los pasos
   de resolver y descargar, nunca al del agente.
@@ -17,8 +26,8 @@ conexiones de fuera del país (en su `RESOLVER`, `"via": "mx"`).
   `POST` con cuerpo de formulario se reenvía igual (lo usa `congreso-extractor`
   para las listas de votación de la Gaceta).
 
-Se despliega a mano (no desde CI, para no guardar credenciales de Cloudflare
-en este repo, en el que también publica el agente):
+El código se despliega a mano (no desde CI, para no guardar credenciales de
+Cloudflare en GitHub); la lista de dominios no lo necesita:
 
 ```bash
 cd egress-mx

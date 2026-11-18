@@ -57,7 +57,9 @@ está mal, se corrige aquí.
   confiable. Se despliega a mano; ver su README.
 - `egress-mx/` — Worker de Cloudflare que descarga desde México las fuentes
   cuyos sitios rechazan IP extranjeras (los estados con `"via": "mx"` en su
-  `RESOLVER`). Se despliega a mano; ver su README.
+  `RESOLVER`). Su código se despliega a mano; su lista de dominios es
+  `egress-mx/permitidos.json`, que lee de main sin desplegarse y que la ronda
+  de expansión de fiscal-extractor amplía sola. Ver su README.
 - `scripts/pr_summary.py` — cuerpo del PR de vigilancia.
 - `scripts/commits_constitucion.py` — hace el commit (o los dos) del documento
   regenerado, con sus trailers (con `--verificadas`, no publica un documento

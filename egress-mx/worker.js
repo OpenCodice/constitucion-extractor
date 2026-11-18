@@ -2,6 +2,10 @@
 // oficiales cuyos sitios rechazan conexiones de fuera del país (incluidas las
 // de GitHub Actions, donde corre la vigilancia). No es un proxy abierto: solo
 // atiende a quien trae el token y solo hacia los dominios de la lista.
+//
+// La lista son estos dominios más los de egress-mx/permitidos.json en main de
+// este repo, que la ronda de expansión de fiscal-extractor amplía sin
+// desplegar el Worker. Si ese archivo no se puede leer, quedan estos.
 
 const PERMITIDOS = new Set([
   "legislacion.edomex.gob.mx",
@@ -22,6 +26,36 @@ const PERMITIDOS = new Set([
 ]);
 
 const TIEMPO_MAX = 60_000;
+
+const LISTA_URL =
+  "https://raw.githubusercontent.com/OpenCodice/constitucion-extractor/main/egress-mx/permitidos.json";
+const LISTA_TTL = 2 * 60_000;
+// Del archivo solo se aceptan dominios mexicanos: aunque alguien lograra
+// escribir en él, no podría abrir el Worker hacia cualquier sitio.
+const DOMINIO_MX = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+mx$/;
+
+let lista = { dominios: PERMITIDOS, hasta: 0 };
+
+async function permitidos(env) {
+  if (Date.now() < lista.hasta) return lista.dominios;
+  try {
+    // env.LISTA_URL la sustituye para probar con `wrangler dev`.
+    const r = await fetch(env.LISTA_URL || LISTA_URL, {
+      cf: { cacheTtl: 60, cacheEverything: true },
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const datos = await r.json();
+    const extra = (Array.isArray(datos?.dominios) ? datos.dominios : [])
+      .filter((d) => typeof d === "string" && DOMINIO_MX.test(d));
+    lista = { dominios: new Set([...PERMITIDOS, ...extra]), hasta: Date.now() + LISTA_TTL };
+  } catch {
+    // Sin el archivo sigue la última lista leída (o la de arriba), y se vuelve
+    // a intentar en un minuto.
+    lista = { dominios: lista.dominios, hasta: Date.now() + 60_000 };
+  }
+  return lista.dominios;
+}
 
 function iguales(a, b) {
   const ea = new TextEncoder().encode(a);
@@ -45,7 +79,8 @@ export default {
     } catch {
       return new Response("falta ?url=\n", { status: 400 });
     }
-    if (!["https:", "http:"].includes(url.protocol) || !PERMITIDOS.has(url.hostname)) {
+    const dominios = await permitidos(env);
+    if (!["https:", "http:"].includes(url.protocol) || !dominios.has(url.hostname)) {
       return new Response(`dominio no permitido: ${url.hostname}\n`, { status: 403 });
     }
     // POST de formulario: algunas listas oficiales (la Gaceta de Diputados) solo
@@ -69,7 +104,7 @@ export default {
     });
     // Una redirección fuera de la lista no se sigue: el contenido debe venir de
     // la fuente oficial.
-    if (!PERMITIDOS.has(new URL(r.url).hostname)) {
+    if (!dominios.has(new URL(r.url).hostname)) {
       return new Response(`redirección a un dominio no permitido: ${new URL(r.url).hostname}\n`, { status: 502 });
     }
     const cabeceras = new Headers();

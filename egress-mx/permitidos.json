@@ -1,0 +1,17 @@
+{
+  "_nota": "Dominios a los que el Worker egress-mx descarga, además de los de PERMITIDOS en worker.js (que los incluye a todos al escribirse esto). El Worker lo lee de main cada pocos minutos y solo acepta dominios .mx. Lo amplía la ronda de expansión de fiscal-extractor (scripts/expansion.py egress-agregar), con su regla de dominios oficiales; ver egress-mx/README.md.",
+  "dominios": [
+    "legislacion.edomex.gob.mx",
+    "www.legisver.gob.mx",
+    "legisver.gob.mx",
+    "www.congresogto.gob.mx",
+    "congresogto.gob.mx",
+    "www.congresoqroo.gob.mx",
+    "documentos.congresoqroo.gob.mx",
+    "sitl.diputados.gob.mx",
+    "gaceta.diputados.gob.mx",
+    "www.senado.gob.mx",
+    "senado.gob.mx",
+    "sil.gobernacion.gob.mx"
+  ]
+}
