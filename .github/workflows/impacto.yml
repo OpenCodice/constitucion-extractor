@@ -87,3 +87,9 @@ jobs:
             echo "::error::Hay correcciones que no quedaron confirmadas como mejora: las vigilancias no las publican."
             exit 1
           fi
+          # impacto_corpus.py solo sale con 0, 1 o 2 cuando midió; cualquier otro
+          # código (3: una excepción; 137: sin memoria) es una medición que no se hizo.
+          case "$rc" in
+            0|1|2) ;;
+            *) echo "::error::No se pudo medir el impacto (impacto_corpus.py salió con código «$rc»)."; exit 1 ;;
+          esac
