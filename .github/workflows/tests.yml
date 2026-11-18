@@ -1,0 +1,69 @@
+name: Tests
+
+# Las vigilancias clonan este extractor en main sin fijar commit y corren sus
+# workflows desde main: un push roto aquí las rompe a todas. Esto lo detecta en
+# el push, no el lunes siguiente.
+
+on:
+  push:
+    branches: [main]
+    # Los registros de verificaciones los publican las vigilancias varias
+    # veces por corrida y no cambian nada de lo que aquí se prueba.
+    paths-ignore: ['verificaciones/**']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install -q -r requirements.txt pytest
+      - run: python -m pytest -q
+
+  scheduler:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - run: node --check scheduler/worker.js && node --check egress-mx/worker.js
+      - run: node --test
+        working-directory: scheduler
+
+  workflows:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: actionlint
+        env:
+          ACTIONLINT: 1.7.12
+        run: |
+          bash <(curl -sSfL "https://raw.githubusercontent.com/rhysd/actionlint/v$ACTIONLINT/scripts/download-actionlint.bash") "$ACTIONLINT" /tmp
+          /tmp/actionlint -color
+      - name: Lint del supervisor (reglas de las cadenas)
+        run: |
+          if ! git clone -q --depth 1 https://github.com/OpenCodice/supervisor.git /tmp/supervisor; then
+            echo "::warning::No se pudo clonar OpenCodice/supervisor: se omite su lint de workflows."
+            exit 0
+          fi
+          python /tmp/supervisor/supervisor/lint_workflows.py .
