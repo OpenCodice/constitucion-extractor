@@ -26,8 +26,15 @@ conexiones de fuera del país (en su `RESOLVER`, `"via": "mx"`).
   `POST` con cuerpo de formulario se reenvía igual (lo usa `congreso-extractor`
   para las listas de votación de la Gaceta).
 
-El código se despliega a mano (no desde CI, para no guardar credenciales de
-Cloudflare en GitHub); la lista de dominios no lo necesita:
+Si la fuente no responde o tarda más de 60 s, contesta 502 con una línea que
+dice cuál fue (`la fuente <dominio> no respondió en 60 s`); los demás errores
+propios son 401 (token), 403 (dominio fuera de la lista) y 502 (redirección
+fuera de la lista). Lo que conteste la fuente pasa con su mismo código.
+
+El código se despliega a mano, también ahora que `desplegar-workers.yml`
+despliega el `scheduler`: es un proxy autenticado y un cambio mal desplegado lo
+dejaría abierto, así que no lo publica ningún workflow ni ningún agente. La
+lista de dominios no necesita despliegue:
 
 ```bash
 cd egress-mx

@@ -49,15 +49,31 @@ está mal, se corrige aquí.
   la Consejería Jurídica (data.consejeria.cdmx.gob.mx), no del Congreso, cuyo
   PDF se quedó en 2019. `certs/` guarda los intermedios TLS que algunos sitios
   no envían; los usan el resolver y la descarga de la vigilancia.
-- `scheduler/` — Worker de Cloudflare que lanza cada lunes la vigilancia de los
-  repos de datos (y un vigilante diario relanza la que lleve más de 8 días sin
-  correr), y cada miércoles, con el mismo cron diario (`RONDAS`), la ronda de
-  expansión de las leyes estatales (`expandir-estatales.yml` de
-  fiscal-extractor). El cron de GitHub Actions dejó de disparar y no es
-  confiable. Se despliega a mano; ver su README.
+- `scheduler/` — Worker de Cloudflare, el reloj del sistema (el cron de GitHub
+  Actions dejó de disparar y no es confiable). Cada 15 minutos lanza
+  `supervisor.yml` de `OpenCodice/supervisor` y, en el minuto 0,
+  `actualizar-congreso.yml`; cada lunes, la vigilancia de los repos de datos (y
+  un vigilante diario relanza la que lleve más de 8 días sin correr); cada
+  miércoles, con ese cron diario (`RONDAS`), la ronda de expansión de las leyes
+  estatales (`expandir-estatales.yml` de fiscal-extractor). Todo con
+  `origen=scheduler`. Además es el hombre muerto del supervisor: si
+  `supervisor.yml` lleva 3 horas sin una corrida exitosa, abre el issue
+  «🚨 El supervisor no corre» en su repo y lo cierra cuando vuelve. Su lógica
+  (qué toca en cada fecha) está en funciones puras con pruebas (`node --test`
+  en `scheduler/`). Lo despliega `desplegar-workers.yml`; ver su README.
+- `.github/workflows/desplegar-workers.yml` — en cada push a main que toca
+  `scheduler/`: `node --check`, `node --test`, `wrangler deploy --dry-run` y,
+  si pasan, `wrangler deploy` y la comprobación de que hay un despliegue nuevo.
+  Sin los secrets de repo `CLOUDFLARE_API_TOKEN` y `CLOUDFLARE_ACCOUNT_ID`
+  termina con un aviso y no despliega. No despliega `egress-mx`.
+- `.github/workflows/tests.yml` — en cada push a main y en cada PR: la suite
+  de `pytest` completa, las pruebas del `scheduler`, `actionlint` sobre todos
+  los workflows y el lint de workflows del supervisor
+  (`OpenCodice/supervisor`, `supervisor/lint_workflows.py`).
 - `egress-mx/` — Worker de Cloudflare que descarga desde México las fuentes
   cuyos sitios rechazan IP extranjeras (los estados con `"via": "mx"` en su
-  `RESOLVER`). Su código se despliega a mano; su lista de dominios es
+  `RESOLVER`). Su código se despliega a mano (es un proxy autenticado: ningún
+  workflow lo publica); su lista de dominios es
   `egress-mx/permitidos.json`, que lee de main sin desplegarse y que la ronda
   de expansión de fiscal-extractor amplía sola. Ver su README.
 - `scripts/pr_summary.py` — cuerpo del PR de vigilancia.
@@ -93,7 +109,10 @@ está mal, se corrige aquí.
   los repos de datos, para que el historial de esos repos solo tenga cambios de
   texto legal. Las lanza cada lunes el Worker `scheduler` y abren el PR en el
   repo de datos con `PR_TOKEN`. El arreglo del agente solo puede tocar
-  `extractor/` y `tests/` (lo impone `scripts/agente/cerrar.sh`).
+  `extractor/` y `tests/` (lo impone `scripts/agente/cerrar.sh`). Su job
+  `salud` relanza una vez la corrida si un job falló o agotó su tiempo (un
+  job que agota `timeout-minutes` termina `cancelled`), y si el reintento
+  también falla abre un issue.
 - `leyes-estatales` también guarda las demás leyes de cada estado
   (`{estado}/{ley}/`, `fuentes.json`), que produce y vigila fiscal-extractor
   (`vigilar-leyes-estatales.yml`, ver su AGENTS.md). Esta vigilancia solo toca
@@ -103,9 +122,31 @@ está mal, se corrige aquí.
   `scripts/validar_commits.py` (Documento `<estado>/<clave>`), y cualquier PR
   de `leyes-estatales` pasa por `validar_pr.sh` completo: constituciones y
   leyes.
-- `.github/workflows/credenciales.yml` — comprobación mensual de `PR_TOKEN` y
-  `CLAUDE_CODE_OAUTH_TOKEN`, las credenciales de organización que usa la
-  vigilancia de todos los repos de datos.
+- `.github/workflows/credenciales.yml` — prueba de verdad `PR_TOKEN`,
+  `CLAUDE_CODE_OAUTH_TOKEN` y `EGRESS_MX_TOKEN` (una descarga por el Worker
+  `egress-mx`), las credenciales de organización que usa la vigilancia de
+  todos los repos de datos. La lanza el supervisor; el cron mensual de GitHub
+  queda de respaldo.
+
+## Contrato con el supervisor
+
+`OpenCodice/supervisor` revisa las corridas de este repo por la API de GitHub
+y relanza lo que haga falta. Para que pueda leerlas, los workflows que lanza
+alguien (`vigilar-cpeum.yml`, `vigilar-estatales.yml`, `credenciales.yml`,
+`desplegar-workers.yml`) cumplen esto, y uno nuevo debe cumplirlo:
+
+- Input `origen`: quién lanzó la corrida (`scheduler`, `supervisor`, `salud`;
+  vacío = a mano). Cada `gh workflow run` dentro de un workflow lo pasa con el
+  nombre de su job (`-f origen=salud`).
+- `run-name` con todos los inputs en el orden en que se declaran y `origen` al
+  final: `vigilar-estatales reintento=[false] estado=[] pdf_url=[]
+  origen=[scheduler]`. La API no devuelve los inputs de una corrida; su título
+  sí. Al agregar un input a un workflow, agrégalo también a su `run-name`.
+- Las vigilancias terminan con el job `estado`, cuyo nombre dice si quedó otra
+  tanda por lanzar (`estado pendiente=[false]`; aquí siempre `false`). Depende
+  de todos los demás jobs: un job nuevo se agrega a su `needs`. Una corrida
+  sin ese job no terminó.
+- Cada job lleva `timeout-minutes`, mayor que la suma de los de sus pasos.
 
 ## Comandos
 
