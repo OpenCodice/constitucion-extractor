@@ -145,10 +145,21 @@ publicar_arreglo() {
   export GIT_AUTHOR_NAME="${GITHUB_ACTOR:-opencodice-ci}" GIT_COMMITTER_NAME="${GITHUB_ACTOR:-opencodice-ci}"
   export GIT_AUTHOR_EMAIL="${GITHUB_ACTOR_ID:-0}+${GITHUB_ACTOR:-opencodice-ci}@users.noreply.github.com"
   export GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
-  if git pull -q --rebase "$destino" main && git push -q "$destino" HEAD:main; then
+  # Con ocho jobs en paralelo y los registros de verificaciones, main puede
+  # avanzar entre el pull y el push: se reintenta antes de dar el arreglo por
+  # perdido.
+  publicado=false
+  for intento in 1 2 3; do
+    if git pull -q --rebase "$destino" main && git push -q "$destino" HEAD:main; then
+      publicado=true
+      break
+    fi
+    git rebase --abort 2>/dev/null || true
+    [ "$intento" = 3 ] || sleep $((intento * 5))
+  done
+  if [ "$publicado" = true ]; then
     estado_arreglo publicado
   else
-    git rebase --abort 2>/dev/null || true
     # El arreglo ya está en un commit: se guarda antes de deshacerlo.
     git format-patch -1 --stdout > "$TRABAJO/arreglo-descartado.patch" || true
     git reset -q --hard HEAD~1
