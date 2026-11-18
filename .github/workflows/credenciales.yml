@@ -4,8 +4,14 @@ run-name: "credenciales origen=[${{ inputs.origen }}]"
 
 # Prueba de verdad las credenciales de las que depende la vigilancia, para que
 # un token vencido o sin permisos se note aquí y no meses después en un PR que
-# nunca se abrió. La lanza el supervisor (OpenCodice/supervisor) por horario,
-# que también deja constancia en un issue si falla; se puede lanzar a mano.
+# nunca se abrió, y falla 30 días antes de que una venza. La lanza el
+# supervisor (OpenCodice/supervisor) cada semana, que también deja constancia
+# en un issue si falla; se puede lanzar a mano.
+#
+# Una credencial vencida o por vencer falla con un `::error::` que empieza por
+# «Credencial por renovar» (scripts/vencimiento.py): el supervisor lo reconoce
+# (`[firmas].credenciales` de su cadenas.toml) y no lo reintenta ni se lo da al
+# agente de infraestructura.
 
 on:
   workflow_dispatch:
@@ -23,6 +29,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            egress-mx
+            scripts
+
       - name: PR_TOKEN — escritura en los repos del sistema
         env:
           GH_TOKEN: ${{ secrets.PR_TOKEN }}
@@ -60,7 +73,23 @@ jobs:
           gh api -X PATCH "repos/$repo/pulls/$pr" -f state=closed > /dev/null
           echo "Contents, Workflows y Pull requests: OK (PR #$pr creado y cerrado)"
 
+      - name: PR_TOKEN — no vence en los próximos 30 días
+        # Cada credencial se prueba aunque otra haya fallado.
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ secrets.PR_TOKEN }}
+        run: |
+          set -euo pipefail
+          [ -n "$GH_TOKEN" ] || { echo "::error::Credencial por renovar: falta el secret PR_TOKEN"; exit 1; }
+          # GitHub dice cuándo vence el token en una cabecera de cualquier
+          # respuesta autenticada; si no vence, la cabecera no viene.
+          cabecera=$(gh api -i rate_limit | tr -d '\r' \
+            | awk -F': ' 'tolower($1) == "github-authentication-token-expiration" { vence = $2 } END { print vence }')
+          python3 scripts/vencimiento.py fecha PR_TOKEN "$cabecera" --sin-fecha "no vence" \
+            --renovar "un PAT fine-grained opencodice-ci nuevo (Contents, Pull requests y Workflows sobre todos los repos de la organización) y gh secret set PR_TOKEN --org OpenCodice --visibility all"
+
       - name: CLAUDE_CODE_OAUTH_TOKEN — el agente responde
+        if: ${{ !cancelled() }}
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
@@ -69,12 +98,16 @@ jobs:
           claude -p "Responde únicamente la palabra: ok" --max-turns 1 | tee /tmp/respuesta.txt
           grep -qi "ok" /tmp/respuesta.txt
 
-      - uses: actions/checkout@v5
-        # Cada credencial se prueba aunque otra haya fallado.
+      - name: CLAUDE_CODE_OAUTH_TOKEN — no vence en los próximos 30 días
         if: ${{ !cancelled() }}
-        with:
-          persist-credentials: false
-          sparse-checkout: egress-mx
+        env:
+          # El token de suscripción no dice cuándo vence: la fecha la guarda
+          # quien lo renueva en esta variable del repo (ver AGENTS.md).
+          VENCE: ${{ vars.CLAUDE_TOKEN_VENCE }}
+        run: |
+          python3 scripts/vencimiento.py fecha CLAUDE_CODE_OAUTH_TOKEN "$VENCE" \
+            --sin-fecha "no se conoce su fecha de vencimiento (falta la variable CLAUDE_TOKEN_VENCE de este repo)" \
+            --renovar "claude setup-token, gh secret set CLAUDE_CODE_OAUTH_TOKEN --org OpenCodice --visibility all y gh variable set CLAUDE_TOKEN_VENCE -R $GITHUB_REPOSITORY --body <fecha ISO en que vence el nuevo>"
 
       - name: EGRESS_MX_TOKEN — una descarga real por el Worker en México
         if: ${{ !cancelled() }}
@@ -100,6 +133,36 @@ jobs:
           done
           echo "::error::El Worker egress-mx no descargó de ningún dominio de permitidos.json."
           exit 1
+
+      - name: CLOUDFLARE_API_TOKEN — activo y no vence en los próximos 30 días
+        if: ${{ !cancelled() }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          renovar="un API token de Cloudflare con Workers Scripts: Edit y gh secret set CLOUDFLARE_API_TOKEN -R $GITHUB_REPOSITORY (el mismo en congreso-extractor y las dos webs si lo comparten)"
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error::Credencial por renovar: falta el secret CLOUDFLARE_API_TOKEN en este repo. Cómo: $renovar"
+            exit 1
+          fi
+          verificar() {
+            codigo=$(curl -sS --max-time 60 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -o "$2" -w '%{http_code}' "$1") || codigo=000
+          }
+          verificar https://api.cloudflare.com/client/v4/user/tokens/verify /tmp/cloudflare.json
+          # Un token de cuenta (no de usuario) se verifica en la ruta de su cuenta.
+          if [ "$codigo" != 200 ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            de_usuario=$codigo
+            verificar "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/tokens/verify" /tmp/cloudflare-cuenta.json
+            if [ "$codigo" = 200 ]; then cp /tmp/cloudflare-cuenta.json /tmp/cloudflare.json; else codigo=$de_usuario; fi
+          fi
+          echo "tokens/verify: HTTP $codigo"
+          # Sin respuesta de Cloudflare no se sabe nada del token: es una falla
+          # pasajera de la comprobación, no una credencial por renovar.
+          case "$codigo" in
+            000|429|5*) echo "::error::Cloudflare no respondió a tokens/verify (HTTP $codigo)."; exit 1 ;;
+          esac
+          python3 scripts/vencimiento.py cloudflare CLOUDFLARE_API_TOKEN /tmp/cloudflare.json --renovar "$renovar"
 
   estado:
     # El supervisor (OpenCodice/supervisor) lee el nombre de este job para saber

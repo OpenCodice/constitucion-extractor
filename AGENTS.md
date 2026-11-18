@@ -51,11 +51,13 @@ está mal, se corrige aquí.
   no envían; los usan el resolver y la descarga de la vigilancia.
 - `scheduler/` — Worker de Cloudflare, el reloj del sistema (el cron de GitHub
   Actions dejó de disparar y no es confiable). Tiene un solo Cron Trigger,
-  cada 15 minutos, y dos responsabilidades: lanzar `supervisor.yml` de
+  cada 15 minutos, y tres responsabilidades: lanzar `supervisor.yml` de
   `OpenCodice/supervisor` (`origen=scheduler`, con reintentos en el mismo
-  tic) y ser su hombre muerto: si `supervisor.yml` lleva 3 horas sin una
+  tic), ser su hombre muerto (si `supervisor.yml` lleva 3 horas sin una
   corrida exitosa, abre el issue «🚨 El supervisor no corre» en su repo y lo
-  cierra cuando vuelve. No lanza nada más: los horarios de las vigilancias y
+  cierra cuando vuelve) y avisar, en el issue «🔑 El token del scheduler
+  vence el <fecha>», cuando a su propio token de GitHub le faltan menos de 30
+  días. No lanza nada más: los horarios de las vigilancias y
   de todo lo demás están en `cadenas.toml` del supervisor. No guarda estado
   (un tic no depende del anterior) y el lanzamiento y el hombre muerto no
   dependen uno del otro. Sus pruebas (`node --test` en `scheduler/`) corren
@@ -125,8 +127,21 @@ está mal, se corrige aquí.
 - `.github/workflows/credenciales.yml` — prueba de verdad `PR_TOKEN`,
   `CLAUDE_CODE_OAUTH_TOKEN` y `EGRESS_MX_TOKEN` (una descarga por el Worker
   `egress-mx`), las credenciales de organización que usa la vigilancia de
-  todos los repos de datos. La lanza el supervisor por horario (no tiene
-  `schedule` propio) y, si falla, el issue lo abre él.
+  todos los repos de datos, y `CLOUDFLARE_API_TOKEN` (secret de este repo, el
+  que despliega el `scheduler`: `tokens/verify` de Cloudflare tiene que
+  decir `active`). Además **falla 30 días antes de que una venza**
+  (`scripts/vencimiento.py`, con pruebas en `tests/test_infra_vencimiento.py`):
+  `PR_TOKEN` por la cabecera `github-authentication-token-expiration` de la
+  API de GitHub, `CLOUDFLARE_API_TOKEN` por el `expires_on` de `tokens/verify`
+  y `CLAUDE_CODE_OAUTH_TOKEN`, que no dice cuándo vence, por la variable de
+  repo `CLAUDE_TOKEN_VENCE` (sin ella, solo un `::notice::`). Quien renueva el
+  token del agente fija ahí la fecha del nuevo:
+  `gh variable set CLAUDE_TOKEN_VENCE -R OpenCodice/constitucion-extractor --body 2027-11-15`.
+  Esas fallas salen con un `::error::` que empieza por «Credencial por
+  renovar», sin nada que cambie de un día a otro salvo la fecha: el
+  supervisor lo reconoce y deja constancia en un issue sin reintentar ni
+  lanzar al agente de infraestructura. La lanza el supervisor cada lunes a las
+  08:00 UTC, antes de las vigilancias (no tiene `schedule` propio).
 
 ## Contrato con el supervisor
 
