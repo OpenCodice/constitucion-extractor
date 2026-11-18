@@ -6,8 +6,8 @@
   "workers_dev": false,
   "preview_urls": false,
   "triggers": {
-    // Deben coincidir con CRONS en worker.js (lo comprueba worker.test.mjs).
-    "crons": ["0 9 * * MON", "0 13 * * MON", "*/15 * * * *", "30 15 * * *"]
+    // El mismo que TIC en worker.js (lo comprueba worker.test.mjs).
+    "crons": ["*/15 * * * *"]
   },
   "observability": { "enabled": true }
 }

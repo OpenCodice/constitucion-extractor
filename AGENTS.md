@@ -50,17 +50,17 @@ está mal, se corrige aquí.
   PDF se quedó en 2019. `certs/` guarda los intermedios TLS que algunos sitios
   no envían; los usan el resolver y la descarga de la vigilancia.
 - `scheduler/` — Worker de Cloudflare, el reloj del sistema (el cron de GitHub
-  Actions dejó de disparar y no es confiable). Cada 15 minutos lanza
-  `supervisor.yml` de `OpenCodice/supervisor` y, en el minuto 0,
-  `actualizar-congreso.yml`; cada lunes, la vigilancia de los repos de datos (y
-  un vigilante diario relanza la que lleve más de 8 días sin correr); cada
-  miércoles, con ese cron diario (`RONDAS`), la ronda de expansión de las leyes
-  estatales (`expandir-estatales.yml` de fiscal-extractor). Todo con
-  `origen=scheduler`. Además es el hombre muerto del supervisor: si
-  `supervisor.yml` lleva 3 horas sin una corrida exitosa, abre el issue
-  «🚨 El supervisor no corre» en su repo y lo cierra cuando vuelve. Su lógica
-  (qué toca en cada fecha) está en funciones puras con pruebas (`node --test`
-  en `scheduler/`). Lo despliega `desplegar-workers.yml`; ver su README.
+  Actions dejó de disparar y no es confiable). Tiene un solo Cron Trigger,
+  cada 15 minutos, y dos responsabilidades: lanzar `supervisor.yml` de
+  `OpenCodice/supervisor` (`origen=scheduler`, con reintentos en el mismo
+  tic) y ser su hombre muerto: si `supervisor.yml` lleva 3 horas sin una
+  corrida exitosa, abre el issue «🚨 El supervisor no corre» en su repo y lo
+  cierra cuando vuelve. No lanza nada más: los horarios de las vigilancias y
+  de todo lo demás están en `cadenas.toml` del supervisor. No guarda estado
+  (un tic no depende del anterior) y el lanzamiento y el hombre muerto no
+  dependen uno del otro. Sus pruebas (`node --test` en `scheduler/`) corren
+  el tic contra un GitHub simulado. Lo despliega `desplegar-workers.yml`; ver
+  su README.
 - `.github/workflows/desplegar-workers.yml` — en cada push a main que toca
   `scheduler/`: `node --check`, `node --test`, `wrangler deploy --dry-run` y,
   si pasan, `wrangler deploy` y la comprobación de que hay un despliegue nuevo.
