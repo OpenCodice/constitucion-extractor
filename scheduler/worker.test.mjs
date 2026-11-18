@@ -3,8 +3,8 @@ import { readFileSync } from "node:fs";
 import { afterEach, test } from "node:test";
 
 import worker, {
-  CRONS, ESPERA_REINTENTO_MS, SUPERVISOR, TIC, TITULO_HOMBRE_MUERTO,
-  decidirHombreMuerto, reintentable, tic,
+  CABECERA_VENCIMIENTO, CRONS, ESPERA_REINTENTO_MS, PREFIJO_VENCIMIENTO, SUPERVISOR, TIC, TITULO_HOMBRE_MUERTO,
+  decidirHombreMuerto, decidirVencimiento, leerVencimiento, reintentable, tic, tituloVencimiento,
 } from "./worker.js";
 
 const utc = (texto) => Date.parse(`${texto}:00Z`);
@@ -18,23 +18,33 @@ afterEach(() => { globalThis.fetch = fetchReal; });
 const json = (cuerpo, status = 200) => new Response(JSON.stringify(cuerpo), { status });
 
 // Un GitHub de mentira. `dispatch` contesta cada lanzamiento (recibe cuántos
-// van); `exitosa` es la fecha de la última corrida exitosa del supervisor y
-// `issue`, el del hombre muerto si está abierto. Devuelve las peticiones.
-function github({ dispatch = () => new Response(null, { status: 204 }), exitosa = null, issue = null, lectura } = {}) {
+// van); `exitosa` es la fecha de la última corrida exitosa del supervisor;
+// `issue` (o `issues`), los que están abiertos; `comentarios`, los de
+// cualquier issue; `vence`, la cabecera de vencimiento del token en cada
+// respuesta aceptada. Devuelve las peticiones.
+function github({
+  dispatch = () => new Response(null, { status: 204 }), exitosa = null, issue = null, issues, comentarios = [],
+  lectura, vence,
+} = {}) {
   const peticiones = [];
   let lanzamientos = 0;
+  const responder = (peticion, metodo) => {
+    if (peticion.clave === DISPATCH) return dispatch(lanzamientos++);
+    if (metodo !== "GET") return json({});
+    if (lectura) return lectura(peticion);
+    if (peticion.clave.endsWith("/runs")) {
+      return json({ workflow_runs: exitosa == null ? [] : [{ created_at: new Date(exitosa).toISOString() }] });
+    }
+    if (peticion.clave.endsWith("/issues")) return json(issues ?? (issue ? [issue] : []));
+    return json(peticion.clave.endsWith("/comments") ? comentarios : []);
+  };
   globalThis.fetch = async (url, opciones = {}) => {
     const metodo = opciones.method ?? "GET";
     const peticion = { clave: `${metodo} ${String(url).split("?")[0]}`, cuerpo: opciones.body ? JSON.parse(opciones.body) : null };
     peticiones.push(peticion);
-    if (peticion.clave === DISPATCH) return dispatch(lanzamientos++);
-    if (metodo !== "GET") return json({});
-    if (lectura) return lectura();
-    if (peticion.clave.endsWith("/runs")) {
-      return json({ workflow_runs: exitosa == null ? [] : [{ created_at: new Date(exitosa).toISOString() }] });
-    }
-    if (peticion.clave.endsWith("/issues")) return json(issue ? [issue] : []);
-    return json([]);
+    const respuesta = await responder(peticion, metodo);
+    if (vence !== undefined && respuesta.ok) respuesta.headers.set(CABECERA_VENCIMIENTO, vence);
+    return respuesta;
   };
   return peticiones;
 }
@@ -104,7 +114,7 @@ test("un lanzamiento que falla por algo pasajero se reintenta en el mismo tic", 
   });
   const { esperas, esperar } = sinEsperar();
   const resultado = await callado(t, () => tic({}, { ahora, esperar }));
-  assert.deepEqual(resultado, { lanzado: true, hombreMuerto: true });
+  assert.deepEqual(resultado, { lanzado: true, hombreMuerto: true, vencimiento: true });
   assert.equal(lanzamientos(peticiones).length, 3);
   assert.deepEqual(esperas, ESPERA_REINTENTO_MS.slice(0, 2));
 });
@@ -135,7 +145,7 @@ test("el hombre muerto corre aunque el lanzamiento falle tras sus reintentos", a
   const peticiones = github({ exitosa: ahora - 5 * HORA, dispatch: () => new Response("caído", { status: 503 }) });
   const { esperas, esperar } = sinEsperar();
   const resultado = await callado(t, () => tic({}, { ahora, esperar }));
-  assert.deepEqual(resultado, { lanzado: false, hombreMuerto: true });
+  assert.deepEqual(resultado, { lanzado: false, hombreMuerto: true, vencimiento: true });
   assert.equal(lanzamientos(peticiones).length, 1 + ESPERA_REINTENTO_MS.length);
   assert.deepEqual(esperas, ESPERA_REINTENTO_MS);
   assert.deepEqual(escrituras(peticiones).map((p) => [p.clave, p.cuerpo.title]),
@@ -146,7 +156,7 @@ test("el supervisor se lanza aunque el hombre muerto falle", async (t) => {
   const ahora = utc("2026-11-16T09:00");
   const peticiones = github({ lectura: () => new Response("sin permiso", { status: 403 }) });
   const resultado = await callado(t, () => tic({}, { ahora, esperar: sinEsperar().esperar }));
-  assert.deepEqual(resultado, { lanzado: true, hombreMuerto: false });
+  assert.deepEqual(resultado, { lanzado: true, hombreMuerto: false, vencimiento: false });
   assert.equal(lanzamientos(peticiones).length, 1);
 });
 
@@ -155,13 +165,13 @@ test("un tic no depende del anterior: tras uno fallido, el siguiente lanza igual
   const { esperar } = sinEsperar();
   github({ dispatch: () => new Response("caído", { status: 500 }), lectura: () => new Response("caído", { status: 500 }) });
   const fallido = await callado(t, () => tic(env, { ahora: utc("2026-11-16T09:00"), esperar }));
-  assert.deepEqual(fallido, { lanzado: false, hombreMuerto: false });
+  assert.deepEqual(fallido, { lanzado: false, hombreMuerto: false, vencimiento: true });
   assert.deepEqual(env, { GITHUB_TOKEN: "x" });
 
   const ahora = utc("2026-11-16T09:15");
   const peticiones = github({ exitosa: ahora - HORA });
   const siguiente = await tic(env, { ahora, esperar });
-  assert.deepEqual(siguiente, { lanzado: true, hombreMuerto: true });
+  assert.deepEqual(siguiente, { lanzado: true, hombreMuerto: true, vencimiento: true });
   assert.equal(lanzamientos(peticiones).length, 1);
 });
 
@@ -207,4 +217,117 @@ test("hombre muerto: la decisión", () => {
 test("solo se reintenta lo que puede pasar al reintentar", () => {
   for (const status of [undefined, 408, 429, 500, 502, 503]) assert.equal(reintentable(status), true, `${status}`);
   for (const status of [401, 403, 404, 422]) assert.equal(reintentable(status), false, `${status}`);
+});
+
+// ---- El vencimiento del token del Worker ----
+
+const DIA = 24 * HORA;
+
+test("vencimiento: los formatos de la cabecera", () => {
+  const esperado = Date.parse("2027-11-20T06:00:00Z");
+  for (const cabecera of [
+    "2027-11-20 06:00:00 UTC", "2027-11-20 00:00:00 -0600", "2027-11-20 08:00:00 +0200", "2027-11-20 11:30:00 +05:30",
+    "2027-11-20T06:00:00Z", "2027-11-20 06:00:00", " 2027-11-20 06:00:00 UTC ",
+  ]) assert.equal(leerVencimiento(cabecera), esperado, cabecera);
+  // Sin cabecera el token no vence; una que no se entiende no es lo mismo.
+  for (const ausente of [null, undefined, "", "  "]) assert.equal(leerVencimiento(ausente), null);
+  for (const rara of ["pronto", "2027-11-20", "20/11/2027 06:00:00 UTC", "2027-13-40 06:00:00 UTC"]) {
+    assert.ok(Number.isNaN(leerVencimiento(rara)), rara);
+  }
+  assert.equal(tituloVencimiento(esperado), "🔑 El token del scheduler vence el 2027-11-20");
+  assert.ok(tituloVencimiento(esperado).startsWith(PREFIJO_VENCIMIENTO));
+});
+
+test("vencimiento: la decisión", () => {
+  const ahora = utc("2026-11-18T15:30");
+  const en = (dias) => ahora + dias * DIA;
+  const decidir = (vence, issue) => decidirVencimiento({ ahora, vence, issue });
+  const aviso = (vence, haceDias) => ({ titulo: tituloVencimiento(vence), ultimoAviso: ahora - haceDias * DIA });
+  // No vence, o vence lejos.
+  assert.equal(decidir(null, null), "nada");
+  assert.equal(decidir(en(365), null), "nada");
+  assert.equal(decidir(en(30), null), "nada");
+  // Dentro del umbral: se abre una vez y se recuerda cada 7 días.
+  assert.equal(decidir(en(29.9), null), "abrir");
+  assert.equal(decidir(en(1), null), "abrir");
+  assert.equal(decidir(en(20), aviso(en(20), 0.01)), "nada");
+  assert.equal(decidir(en(20), aviso(en(20), 6.9)), "nada");
+  assert.equal(decidir(en(20), aviso(en(20), 7)), "comentar");
+  // Renovado: la fecha cambió. Lejos (o sin fecha) se cierra; cerca, se cierra y se abre el de la fecha nueva.
+  assert.equal(decidir(en(365), aviso(en(20), 1)), "cerrar");
+  assert.equal(decidir(null, aviso(en(20), 1)), "cerrar");
+  assert.equal(decidir(en(25), aviso(en(20), 1)), "reabrir");
+});
+
+test("el tic avisa del vencimiento con lo que ya recibió, sin peticiones de más", async (t) => {
+  const ahora = utc("2026-11-18T15:30");
+  const lejos = github({ exitosa: ahora, vence: "2027-11-20 06:00:00 UTC" });
+  assert.deepEqual(await callado(t, () => tic({}, { ahora })), { lanzado: true, hombreMuerto: true, vencimiento: true });
+  const sinFecha = github({ exitosa: ahora });
+  await tic({}, { ahora });
+  assert.deepEqual(lejos.map((p) => p.clave), sinFecha.map((p) => p.clave));
+  assert.deepEqual(escrituras(lejos), []);
+  assert.equal(lejos.filter((p) => p.clave === `GET ${API}/issues`).length, 1);
+
+  const cerca = github({ exitosa: ahora, vence: "2026-12-08 00:00:00 -0600" });
+  await tic({}, { ahora });
+  const [abierto] = escrituras(cerca);
+  assert.equal(escrituras(cerca).length, 1);
+  assert.equal(abierto.clave, `POST ${API}/issues`);
+  assert.equal(abierto.cuerpo.title, "🔑 El token del scheduler vence el 2026-12-08");
+  for (const texto of ["2026-12-08 06:00 UTC", "faltan 19 días", "Actions: read and write e Issues: read and write",
+    "npx wrangler secret put GITHUB_TOKEN", "constitucion-extractor/scheduler/"]) {
+    assert.ok(abierto.cuerpo.body.includes(texto), texto);
+  }
+});
+
+test("el aviso de vencimiento se repite cada 7 días y se cierra al renovar el token", async (t) => {
+  const ahora = utc("2026-11-18T15:30");
+  const hace = (dias) => new Date(ahora - dias * DIA).toISOString();
+  const vence = "2026-12-08 06:00:00 UTC";
+  const issue = (dias) => ({ number: 9, title: "🔑 El token del scheduler vence el 2026-12-08", created_at: hace(dias) });
+  const tocar = async (mundo) => { await callado(t, () => tic({}, { ahora })); return escrituras(mundo).map((p) => p.clave); };
+
+  assert.deepEqual(await tocar(github({ exitosa: ahora, vence, issue: issue(3) })), []);
+  assert.deepEqual(await tocar(github({ exitosa: ahora, vence, issue: issue(8) })), [`POST ${API}/issues/9/comments`]);
+  // Ya se recordó hace dos días: se lee del último comentario del issue.
+  assert.deepEqual(await tocar(github({ exitosa: ahora, vence, issue: issue(8), comentarios: [{ created_at: hace(2) }] })), []);
+
+  const cerrar = [`POST ${API}/issues/9/comments`, `PATCH ${API}/issues/9`];
+  assert.deepEqual(await tocar(github({ exitosa: ahora, vence: "2027-11-20 06:00:00 UTC", issue: issue(8) })), cerrar);
+  assert.deepEqual(await tocar(github({ exitosa: ahora, issue: issue(8) })), cerrar);
+  // Renovado por poco tiempo: se cierra el de la fecha vieja y se abre el de la nueva.
+  const corto = github({ exitosa: ahora, vence: "2026-12-15 06:00:00 UTC", issue: issue(1) });
+  assert.deepEqual(await tocar(corto), [...cerrar, `POST ${API}/issues`]);
+  assert.equal(escrituras(corto)[2].cuerpo.title, "🔑 El token del scheduler vence el 2026-12-15");
+  // El issue del hombre muerto no es el del vencimiento, ni al revés.
+  const ambos = github({ exitosa: ahora, vence, issues: [{ number: 7, title: TITULO_HOMBRE_MUERTO, created_at: hace(1) }, issue(1)] });
+  assert.deepEqual(await tocar(ambos), [`POST ${API}/issues/7/comments`, `PATCH ${API}/issues/7`]);
+});
+
+test("una falla del aviso de vencimiento no alcanza al tic ni al hombre muerto", async (t) => {
+  const ahora = utc("2026-11-18T15:30");
+  // Una cabecera que no se entiende: ni se abre ni se cierra nada por ella.
+  const rara = github({ exitosa: ahora - 5 * HORA, vence: "pronto", issue: { number: 9, title: `${PREFIJO_VENCIMIENTO}2026-12-08`, created_at: new Date(ahora).toISOString() } });
+  assert.deepEqual(await callado(t, () => tic({}, { ahora })), { lanzado: true, hombreMuerto: true, vencimiento: false });
+  assert.deepEqual(escrituras(rara).map((p) => [p.clave, p.cuerpo.title]), [[`POST ${API}/issues`, TITULO_HOMBRE_MUERTO]]);
+
+  // Sin permiso para escribir issues: el lanzamiento sale igual.
+  const peticiones = github({ exitosa: ahora, vence: "2026-12-08 06:00:00 UTC" });
+  const fetchFalso = globalThis.fetch;
+  globalThis.fetch = (url, opciones = {}) => (opciones.method === "POST" && String(url).endsWith("/issues")
+    ? Promise.resolve(new Response("sin permiso", { status: 403 })) : fetchFalso(url, opciones));
+  assert.deepEqual(await tic({}, { ahora }), { lanzado: true, hombreMuerto: true, vencimiento: false });
+  assert.equal(lanzamientos(peticiones).length, 1);
+
+  // Si el hombre muerto no pudo leer los issues, el aviso los pide por su cuenta.
+  let lecturas = 0;
+  const solo = github({ vence: "2026-12-08 06:00:00 UTC", lectura: (p) => (p.clave.endsWith("/runs") ? new Response("caído", { status: 500 }) : (lecturas++, json([]))) });
+  assert.deepEqual(await tic({}, { ahora }), { lanzado: true, hombreMuerto: false, vencimiento: true });
+  assert.equal(lecturas, 1);
+  assert.deepEqual(escrituras(solo).map((p) => p.cuerpo.title), ["🔑 El token del scheduler vence el 2026-12-08"]);
+
+  // Con el token ya rechazado en todo no hay nada que leer ni dónde avisar.
+  github({ dispatch: () => new Response("Bad credentials", { status: 401 }), lectura: () => new Response("Bad credentials", { status: 401 }) });
+  assert.deepEqual(await tic({}, { ahora }), { lanzado: false, hombreMuerto: false, vencimiento: true });
 });
