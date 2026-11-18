@@ -18,8 +18,11 @@ const VIGILANCIAS = [
   // Las demás leyes de cada estado; el agente no repara el extractor aquí, así que
   // no compite con la federal por fiscal-extractor.
   { repo: "fiscal-extractor", workflow: "vigilar-leyes-estatales.yml", cron: "0 13 * * MON" },
-  // Al final: liga los decretos con los commits de reforma que dejaron las anteriores.
-  { repo: "congreso-extractor", workflow: "actualizar-congreso.yml", cron: "0 18 * * MON" },
+  // Cada hora: lee el archivo de páginas del Congreso (Worker congreso-archivo)
+  // y le pide lo que falta; publica una vez al día, a las 18:00, después de las
+  // vigilancias de leyes de los lunes (liga los decretos con sus commits).
+  { repo: "congreso-extractor", workflow: "actualizar-congreso.yml", cron: "0 * * * *",
+    inputs: (hora) => ({ publicar: hora === 18 ? "si" : "no" }) },
 ];
 
 // El vigilante: si una vigilancia lleva más de esto sin ninguna corrida, se lanza.
@@ -51,10 +54,10 @@ async function github(env, ruta, opciones = {}) {
   return r.status === 204 ? null : r.json();
 }
 
-async function lanzar(env, v, motivo) {
+async function lanzar(env, v, motivo, hora = new Date().getUTCHours()) {
   await github(env, `/repos/${ORG}/${v.repo}/actions/workflows/${v.workflow}/dispatches`, {
     method: "POST",
-    body: JSON.stringify({ ref: "main" }),
+    body: JSON.stringify({ ref: "main", ...(v.inputs ? { inputs: v.inputs(hora) } : {}) }),
   });
   console.log(`lanzada ${v.repo}/${v.workflow} (${motivo})`);
 }
@@ -85,7 +88,8 @@ export default {
       }
     }
     // Una falla no detiene las demás; queda en los logs del Worker.
-    const resultados = await Promise.allSettled(toca.map((v) => lanzar(env, v, `cron ${evento.cron}`)));
+    const hora = new Date(evento.scheduledTime).getUTCHours();
+    const resultados = await Promise.allSettled(toca.map((v) => lanzar(env, v, `cron ${evento.cron}`, hora)));
     for (const r of resultados) if (r.status === "rejected") console.error(r.reason);
   },
 };

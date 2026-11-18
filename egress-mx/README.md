@@ -10,6 +10,9 @@ conexiones de fuera del país (en su `RESOLVER`, `"via": "mx"`).
 - El token es el secret `TOKEN` del Worker y, del lado de GitHub, el secret de
   la organización `EGRESS_MX_TOKEN`. La vigilancia solo lo expone a los pasos
   de resolver y descargar, nunca al del agente.
+- El Worker `congreso-archivo` (`congreso-extractor/archivo/`) lo llama por
+  service binding con su propio token, el secret `TOKEN_ARCHIVO` (el mismo
+  valor que su `EGRESS_TOKEN`).
 - Uso: `GET https://egress-mx.<cuenta>.workers.dev/?url=<URL oficial>`; un
   `POST` con cuerpo de formulario se reenvía igual (lo usa `congreso-extractor`
   para las listas de votación de la Gaceta).

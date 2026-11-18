@@ -7,7 +7,7 @@
   "preview_urls": false,
   "triggers": {
     // Deben coincidir con VIGILANCIAS y VIGILANTE en worker.js.
-    "crons": ["0 9 * * MON", "0 13 * * MON", "0 18 * * MON", "30 15 * * *"]
+    "crons": ["0 9 * * MON", "0 13 * * MON", "0 * * * *", "30 15 * * *"]
   },
   "observability": { "enabled": true }
 }

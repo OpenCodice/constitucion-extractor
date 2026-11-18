@@ -7,6 +7,10 @@ repos públicos, se apaga tras 60 días sin commits.
 
 - `VIGILANCIAS` en `worker.js`: qué workflow se lanza y cuándo (UTC). Cada
   horario debe estar también en `triggers.crons` de `wrangler.jsonc`.
+- La actualización del Congreso (`actualizar-congreso.yml` de
+  congreso-extractor) va cada hora con `inputs`: a las 18:00 UTC con
+  `publicar=si` (abre el PR) y las demás con `publicar=no`, que solo le piden
+  al Worker `congreso-archivo` las páginas que faltan.
 - Vigilante diario (15:30 UTC): si una vigilancia lleva más de 8 días sin
   ninguna corrida, la lanza.
 - `RONDAS`: workflows semanales que no son vigilancias y van con ese mismo cron

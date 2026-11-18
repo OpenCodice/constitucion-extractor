@@ -16,6 +16,9 @@ const PERMITIDOS = new Set([
   "gaceta.diputados.gob.mx",
   "www.senado.gob.mx",
   "senado.gob.mx",
+  // Desde Cloudflare fuera de México, el SIL no contesta (530): lo pide el
+  // Worker congreso-archivo por aquí.
+  "sil.gobernacion.gob.mx",
 ]);
 
 const TIEMPO_MAX = 60_000;
@@ -30,7 +33,9 @@ function iguales(a, b) {
 export default {
   async fetch(request, env) {
     const token = (request.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
-    if (!env.TOKEN || !iguales(token, env.TOKEN)) {
+    // TOKEN: la vigilancia en GitHub; TOKEN_ARCHIVO: el Worker congreso-archivo
+    // (descarga perpetua de congreso-extractor), por service binding.
+    if (![env.TOKEN, env.TOKEN_ARCHIVO].some((t) => t && iguales(token, t))) {
       return new Response("no autorizado\n", { status: 401 });
     }
     const destino = new URL(request.url).searchParams.get("url");
