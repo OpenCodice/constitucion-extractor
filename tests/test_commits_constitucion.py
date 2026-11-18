@@ -152,3 +152,31 @@ def test_correccion_confirmada_se_publica(repo, tmp_path):
     assert len(_git(repo, "rev-list", f"{base}..HEAD").split()) == 2
     assert im.main(["exigir", str(repo), "--base", base,
                     "--registro", str(tmp_path / "registro")]) == 0
+
+
+def test_restaurar_no_esconde_un_cambio_del_mismo_tamano(tmp_path):
+    """Un artículo corregido del mismo tamaño ('lectrua' → 'lectura') restaurado
+    con la fecha de su origen, igual en segundos a la del índice, no lo veía
+    `git status` (con un inodo reutilizado y el mismo ctime, en Linux).
+    checkStat=minimal y trustctime=false reproducen ese caso en cualquier
+    sistema."""
+    import os
+    import time
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for a in (("init", "-q"), ("config", "user.email", "t@t"), ("config", "user.name", "t"),
+              ("config", "core.checkStat", "minimal"), ("config", "core.trustctime", "false")):
+        _git(repo, *a)
+    f = repo / DOC / "articulos" / "001.md"
+    f.parent.mkdir(parents=True)
+    f.write_text("Una lectrua.\n")
+    mtime = f.stat().st_mtime_ns
+    time.sleep(1.05)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "x")
+    origen = tmp_path / "origen"
+    (origen / DOC / "articulos").mkdir(parents=True)
+    (origen / DOC / "articulos" / "001.md").write_text("Una lectura.\n")
+    os.utime(origen / DOC / "articulos" / "001.md", ns=(mtime, mtime))
+    cc._restaurar(str(repo), DOC, origen)
+    assert cc.cambios(str(repo), DOC) == [f"{DOC}/articulos/001.md"]

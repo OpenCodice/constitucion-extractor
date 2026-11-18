@@ -120,7 +120,10 @@ def _restaurar(repo: str, documento: str, origen: Path) -> None:
         if (Path(repo) / rel).exists():
             shutil.rmtree(Path(repo) / rel)
         if (origen / rel).exists():
-            shutil.copytree(origen / rel, Path(repo) / rel)
+            # Con fecha nueva: con la del origen (copy2), un artículo corregido del
+            # mismo tamaño y la misma fecha en segundos que el del índice no lo ve
+            # `git status`, y la corrección no se publicaría.
+            shutil.copytree(origen / rel, Path(repo) / rel, copy_function=shutil.copy)
 
 
 def sin_confirmar(repo: str, documento: str, pdf_sha: str, registro: dict | None) -> list[str]:
