@@ -90,9 +90,9 @@ está mal, se corrige aquí.
 - `.github/workflows/revisar-pr.yml` (reutilizable) y `scripts/validar_pr.sh` —
   el gate de los PR de los repos de datos, que así no necesitan workflows
   propios.
-  Cada vigilancia lo llama tras abrir su PR (y se puede lanzar a mano con
-  `gh workflow run revisar-pr.yml -f repo=OpenCodice/<repo> -f pr=<n> -f
-  prefijo=reforma/` para un PR que quedó abierto). El job `validar`, sin
+  Cada vigilancia lo llama tras abrir su PR (`workflow_call`: es parte de su
+  corrida, no un lanzamiento), y para un PR que quedó abierto lo lanza el
+  supervisor (`workflow_dispatch` con `repo`, `pr` y `prefijo`). El job `validar`, sin
   secretos, corre `validar_pr.sh` sobre el sha de la cabeza del PR:
   `extractor validar` de cada documento (en `leyes-estatales`, cada
   `{estado}/constitucion` con su perfil y las leyes `{estado}/{ley}` con el
@@ -107,12 +107,12 @@ está mal, se corrige aquí.
 - `.github/workflows/vigilar-cpeum.yml` y `vigilar-estatales.yml` — la
   vigilancia de `constitucion-mexicana` y `leyes-estatales`. Viven aquí, no en
   los repos de datos, para que el historial de esos repos solo tenga cambios de
-  texto legal. Las lanza cada lunes el Worker `scheduler` y abren el PR en el
-  repo de datos con `PR_TOKEN`. El arreglo del agente solo puede tocar
-  `extractor/` y `tests/` (lo impone `scripts/agente/cerrar.sh`). Su job
-  `salud` relanza una vez la corrida si un job falló o agotó su tiempo (un
-  job que agota `timeout-minutes` termina `cancelled`), y si el reintento
-  también falla abre un issue.
+  texto legal. Las lanza el supervisor (`OpenCodice/supervisor`) cada lunes y
+  abren el PR en el repo de datos con `PR_TOKEN`. El arreglo del agente solo
+  puede tocar `extractor/` y `tests/` (lo impone `scripts/agente/cerrar.sh`).
+  No relanzan nada, no abren issues y no avisan a la web: si una falla o agota
+  su tiempo, el supervisor la relanza con los mismos inputs y deja constancia,
+  y también redespliega constitucion.app cuando cambian los datos.
 - `leyes-estatales` también guarda las demás leyes de cada estado
   (`{estado}/{ley}/`, `fuentes.json`), que produce y vigila fiscal-extractor
   (`vigilar-leyes-estatales.yml`, ver su AGENTS.md). Esta vigilancia solo toca
@@ -125,27 +125,47 @@ está mal, se corrige aquí.
 - `.github/workflows/credenciales.yml` — prueba de verdad `PR_TOKEN`,
   `CLAUDE_CODE_OAUTH_TOKEN` y `EGRESS_MX_TOKEN` (una descarga por el Worker
   `egress-mx`), las credenciales de organización que usa la vigilancia de
-  todos los repos de datos. La lanza el supervisor; el cron mensual de GitHub
-  queda de respaldo.
+  todos los repos de datos. La lanza el supervisor por horario (no tiene
+  `schedule` propio) y, si falla, el issue lo abre él.
 
 ## Contrato con el supervisor
 
-`OpenCodice/supervisor` revisa las corridas de este repo por la API de GitHub
-y relanza lo que haga falta. Para que pueda leerlas, los workflows que lanza
-alguien (`vigilar-cpeum.yml`, `vigilar-estatales.yml`, `credenciales.yml`,
-`desplegar-workers.yml`) cumplen esto, y uno nuevo debe cumplirlo:
+`OpenCodice/supervisor` es el único que lanza corridas: por horario (los
+horarios están en su `cadenas.toml`), cuando una falla y cuando otra corrida
+lo pide. **Ningún workflow ni script de este repo lanza a otro ni a sí
+mismo**: nada de `gh workflow run`, `gh run rerun`, `…/dispatches` ni
+`repository_dispatch` en `.github/` ni en `scripts/`
+(`tests/test_infra_sin_lanzamientos.py` y el lint del supervisor lo exigen).
+Tampoco reintentan, abren issues por sus fallas ni avisan a la web: eso
+también es del supervisor. Llamar a `revisar-pr.yml` con `workflow_call` no es
+lanzar. La única excepción del repo es el Worker `scheduler`, que lanza solo
+`supervisor.yml`.
 
-- Input `origen`: quién lanzó la corrida (`scheduler`, `supervisor`, `salud`;
-  vacío = a mano). Cada `gh workflow run` dentro de un workflow lo pasa con el
-  nombre de su job (`-f origen=salud`).
+Para que el supervisor pueda leer las corridas por la API de GitHub, los
+workflows que lanza (`vigilar-cpeum.yml`, `vigilar-estatales.yml`,
+`credenciales.yml`, `desplegar-workers.yml`) cumplen esto, y uno nuevo debe
+cumplirlo:
+
+- Input `origen`: quién lanzó la corrida (`supervisor`; vacío = a mano).
 - `run-name` con todos los inputs en el orden en que se declaran y `origen` al
-  final: `vigilar-estatales reintento=[false] estado=[] pdf_url=[]
-  origen=[scheduler]`. La API no devuelve los inputs de una corrida; su título
-  sí. Al agregar un input a un workflow, agrégalo también a su `run-name`.
-- Las vigilancias terminan con el job `estado`, cuyo nombre dice si quedó otra
-  tanda por lanzar (`estado pendiente=[false]`; aquí siempre `false`). Depende
-  de todos los demás jobs: un job nuevo se agrega a su `needs`. Una corrida
-  sin ese job no terminó.
+  final: `vigilar-estatales estado=[] pdf_url=[] origen=[supervisor]`. La API
+  no devuelve los inputs de una corrida; su título sí. Al agregar un input a
+  un workflow, agrégalo también a su `run-name`. El supervisor relanza una
+  corrida que falló con esos mismos inputs, así que un input solo existe si
+  cambia lo que hace la corrida.
+- El último job es `estado`, sin secretos y con `permissions: {}`. Su nombre
+  dice si quedó otra tanda con los mismos inputs (`estado pendiente=[false]`;
+  aquí siempre `false`) y sube el artefacto `cadena` (`cadena.json`: el
+  contexto `needs`, con el resultado y las salidas de cada job). Depende de
+  todos los demás jobs: un job nuevo se agrega a su `needs`. Una corrida sin
+  ese job no terminó.
+- Un paso que necesite que después corra otro workflow no lo lanza: lo
+  **pide**. Escribe una salida con la petición en JSON
+  (`{"workflow": "<archivo.yml>", "inputs": {…}}`, más `"repo"` si es de otro
+  repo; valores siempre cadenas, sin `origen`; con `jq -cn --arg` si depende
+  de una variable) y el job la expone como salida con un nombre que empieza
+  por `pedir`. El supervisor la lee de `cadena` y la atiende si su
+  `cadenas.toml` lo permite. Hoy ningún workflow de este repo pide nada.
 - Cada job lleva `timeout-minutes`, mayor que la suma de los de sus pasos.
 
 ## Comandos
