@@ -1,11 +1,19 @@
 name: Comprobar credenciales
+# El supervisor lee los inputs de aquí: la API no los devuelve.
+run-name: "credenciales origen=[${{ inputs.origen }}]"
 
-# Prueba de verdad las dos credenciales de las que depende la vigilancia, para
-# que un token vencido o sin permisos se note aquí y no meses después en un PR
-# que nunca se abrió. Corre el día 1 de cada mes y a mano.
+# Prueba de verdad las credenciales de las que depende la vigilancia, para que
+# un token vencido o sin permisos se note aquí y no meses después en un PR que
+# nunca se abrió. La lanza el supervisor (OpenCodice/supervisor) y se puede
+# lanzar a mano; el cron de GitHub, que no es confiable, queda de respaldo.
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      origen:
+        description: 'Quién lanzó la corrida (scheduler, supervisor, continuar, reparar, ronda, salud); vacío = a mano'
+        required: false
+        default: ''
   schedule:
     - cron: '0 10 1 * *'
 
@@ -16,6 +24,7 @@ permissions:
 jobs:
   comprobar:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: PR_TOKEN — escritura en los repos del sistema
         env:
@@ -63,10 +72,43 @@ jobs:
           claude -p "Responde únicamente la palabra: ok" --max-turns 1 | tee /tmp/respuesta.txt
           grep -qi "ok" /tmp/respuesta.txt
 
+      - uses: actions/checkout@v5
+        # Cada credencial se prueba aunque otra haya fallado.
+        if: ${{ !cancelled() }}
+        with:
+          persist-credentials: false
+          sparse-checkout: egress-mx
+
+      - name: EGRESS_MX_TOKEN — una descarga real por el Worker en México
+        if: ${{ !cancelled() }}
+        env:
+          EGRESS_MX_TOKEN: ${{ secrets.EGRESS_MX_TOKEN }}
+        run: |
+          [ -n "$EGRESS_MX_TOKEN" ] || { echo "::error::Falta el secret EGRESS_MX_TOKEN"; exit 1; }
+          # Un sitio oficial caído no es una credencial vencida: basta con que
+          # uno de los dominios de la lista entregue su portada. Un 401 sí es
+          # definitivo: el token no es el del Worker.
+          for dominio in $(python3 -c 'import json; print(" ".join(json.load(open("egress-mx/permitidos.json"))["dominios"]))'); do
+            codigo=$(curl -sS --max-time 90 -H "Authorization: Bearer $EGRESS_MX_TOKEN" -o /tmp/egress.txt -w '%{http_code}' \
+              "https://egress-mx.danielcardeenas.workers.dev/?url=https%3A%2F%2F$dominio%2F") || codigo=000
+            echo "$dominio: HTTP $codigo"
+            if [ "$codigo" = 401 ]; then
+              echo "::error::El Worker egress-mx rechazó EGRESS_MX_TOKEN (no coincide con su secret TOKEN)."
+              exit 1
+            fi
+            if [ "$codigo" = 200 ] && [ -s /tmp/egress.txt ]; then
+              echo "Descarga por egress-mx: OK ($dominio, $(wc -c < /tmp/egress.txt) bytes)"
+              exit 0
+            fi
+          done
+          echo "::error::El Worker egress-mx no descargó de ningún dominio de permitidos.json."
+          exit 1
+
   avisar:
     needs: comprobar
     if: failure()
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
