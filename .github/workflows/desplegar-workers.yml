@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       origen:
-        description: 'Quién lanzó la corrida (scheduler, supervisor, continuar, reparar, ronda, salud); vacío = a mano'
+        description: 'Quién lanzó la corrida (supervisor); vacío = a mano'
         required: false
         default: ''
 
@@ -82,3 +82,24 @@ jobs:
             exit 1
           fi
           echo "Despliegue nuevo: $nuevo"
+
+  estado:
+    # El supervisor (OpenCodice/supervisor) lee el nombre de este job para saber
+    # si quedó otra tanda, y el artefacto `cadena` para saber cómo terminó cada
+    # job y qué pidió.
+    name: "estado pendiente=[false]"
+    needs: [scheduler]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Lo que declaró cada job
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: printf '%s' "$NEEDS" > cadena.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cadena
+          path: cadena.json
+          retention-days: 14

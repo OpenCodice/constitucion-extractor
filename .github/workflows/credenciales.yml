@@ -4,22 +4,19 @@ run-name: "credenciales origen=[${{ inputs.origen }}]"
 
 # Prueba de verdad las credenciales de las que depende la vigilancia, para que
 # un token vencido o sin permisos se note aquí y no meses después en un PR que
-# nunca se abrió. La lanza el supervisor (OpenCodice/supervisor) y se puede
-# lanzar a mano; el cron de GitHub, que no es confiable, queda de respaldo.
+# nunca se abrió. La lanza el supervisor (OpenCodice/supervisor) por horario,
+# que también deja constancia en un issue si falla; se puede lanzar a mano.
 
 on:
   workflow_dispatch:
     inputs:
       origen:
-        description: 'Quién lanzó la corrida (scheduler, supervisor, continuar, reparar, ronda, salud); vacío = a mano'
+        description: 'Quién lanzó la corrida (supervisor); vacío = a mano'
         required: false
         default: ''
-  schedule:
-    - cron: '0 10 1 * *'
 
 permissions:
   contents: read
-  issues: write
 
 jobs:
   comprobar:
@@ -104,23 +101,23 @@ jobs:
           echo "::error::El Worker egress-mx no descargó de ningún dominio de permitidos.json."
           exit 1
 
-  avisar:
-    needs: comprobar
-    if: failure()
+  estado:
+    # El supervisor (OpenCodice/supervisor) lee el nombre de este job para saber
+    # si quedó otra tanda, y el artefacto `cadena` para saber cómo terminó cada
+    # job y qué pidió.
+    name: "estado pendiente=[false]"
+    needs: [comprobar]
+    if: ${{ always() }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    env:
-      GH_TOKEN: ${{ github.token }}
+    timeout-minutes: 5
+    permissions: {}
     steps:
-      - name: Abrir o actualizar un issue
-        run: |
-          titulo="🚨 Falló: ${{ github.workflow }}"
-          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-          n=$(gh issue list -R "$GITHUB_REPOSITORY" --state open \
-                --search "in:title \"$titulo\"" --json number -q '.[0].number')
-          if [ -n "$n" ]; then
-            gh issue comment "$n" -R "$GITHUB_REPOSITORY" --body "Volvió a fallar: $url"
-          else
-            gh issue create -R "$GITHUB_REPOSITORY" --title "$titulo" \
-              --body "Una credencial de la vigilancia venció o perdió permisos: $url"
-          fi
+      - name: Lo que declaró cada job
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: printf '%s' "$NEEDS" > cadena.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cadena
+          path: cadena.json
+          retention-days: 14
