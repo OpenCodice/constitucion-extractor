@@ -66,4 +66,5 @@ jobs:
             echo "::warning::No se pudo clonar OpenCodice/supervisor: se omite su lint de workflows."
             exit 0
           fi
+          pip install -q -r /tmp/supervisor/requirements.txt
           python /tmp/supervisor/supervisor/lint_workflows.py .
