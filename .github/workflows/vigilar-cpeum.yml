@@ -1,4 +1,6 @@
 name: Vigilar reformas CPEUM
+# El supervisor lee los inputs de aquí: la API no los devuelve.
+run-name: "vigilar-cpeum reintento=[${{ inputs.reintento }}] origen=[${{ inputs.origen }}]"
 
 # Vigila el PDF oficial de la Constitución y abre un PR cuando el texto vigente
 # cambia (= hubo una reforma publicada en el DOF). La detección de cambios la
@@ -17,6 +19,10 @@ on:
         description: 'Reintento automático tras una falla'
         type: boolean
         default: false
+      origen:
+        description: 'Quién lanzó la corrida (scheduler, supervisor, continuar, reparar, ronda, salud); vacío = a mano'
+        required: false
+        default: ''
 
 permissions:
   contents: write               # crear la rama y commitear
@@ -37,6 +43,8 @@ concurrency:
 jobs:
   vigilar:
     runs-on: ubuntu-latest
+    # Los tres pasos del agente suman 300 min; el resto es para las compuertas.
+    timeout-minutes: 350
     outputs:
       pr: ${{ steps.pr.outputs.pull-request-number }}
     steps:
@@ -281,6 +289,7 @@ jobs:
     needs: [vigilar, revisar]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       actions: write
       issues: write
@@ -290,12 +299,13 @@ jobs:
       - name: Reintentar una vez si falló
         # Casi todas las fallas son de red o de la fuente oficial: se reintenta
         # solo, una vez. Si el reintento también falla, la siguiente vigilancia
-        # semanal lo vuelve a intentar.
-        if: (needs.vigilar.result == 'failure' || needs.revisar.result == 'failure') && inputs.reintento != true
-        run: gh workflow run vigilar-cpeum.yml -R "$GITHUB_REPOSITORY" --ref main -f reintento=true
+        # semanal lo vuelve a intentar. Un job que agota su tiempo termina
+        # `cancelled` sin que la corrida esté cancelada: también es una falla.
+        if: ${{ !cancelled() && (contains(fromJSON('["failure","cancelled"]'), needs.vigilar.result) || contains(fromJSON('["failure","cancelled"]'), needs.revisar.result)) && inputs.reintento != true }}
+        run: gh workflow run vigilar-cpeum.yml -R "$GITHUB_REPOSITORY" --ref main -f reintento=true -f origen=salud
 
       - name: Dejar constancia si también falló el reintento
-        if: (needs.vigilar.result == 'failure' || needs.revisar.result == 'failure') && inputs.reintento == true
+        if: ${{ !cancelled() && (contains(fromJSON('["failure","cancelled"]'), needs.vigilar.result) || contains(fromJSON('["failure","cancelled"]'), needs.revisar.result)) && inputs.reintento == true }}
         run: |
           titulo="🚨 Falló: ${{ github.workflow }}"
           url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
@@ -330,3 +340,14 @@ jobs:
           # No falla la vigilancia: sus datos ya están publicados; solo la web se
           # queda atrás hasta el siguiente aviso o push.
           echo "::warning::No se pudo avisar a constitucion-web tras tres intentos."
+
+  estado:
+    # El supervisor (OpenCodice/supervisor) lee el nombre de este job para saber si quedó trabajo pendiente.
+    name: "estado pendiente=[false]"
+    needs: [vigilar, revisar, salud]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - run: 'true'

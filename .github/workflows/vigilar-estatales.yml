@@ -1,4 +1,6 @@
 name: Vigilar reformas estatales
+# El supervisor lee los inputs de aquí: la API no los devuelve.
+run-name: "vigilar-estatales reintento=[${{ inputs.reintento }}] estado=[${{ inputs.estado }}] pdf_url=[${{ inputs.pdf_url }}] origen=[${{ inputs.origen }}]"
 
 # Vigila el PDF oficial de cada constitución estatal y abre un PR cuando el
 # texto vigente cambia. La detección la hace git: se regenera el texto y se
@@ -32,6 +34,10 @@ on:
         description: 'URL del PDF (override del resolver; requiere elegir estado)'
         type: string
         default: ''
+      origen:
+        description: 'Quién lanzó la corrida (scheduler, supervisor, continuar, reparar, ronda, salud); vacío = a mano'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -50,6 +56,7 @@ concurrency:
 jobs:
   planear:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     outputs:
       matriz: ${{ steps.m.outputs.matriz }}
     steps:
@@ -65,6 +72,9 @@ jobs:
     # Imagen fija: la conversión del Word (estados con formato doc) depende de
     # la versión de LibreOffice de la imagen.
     runs-on: ubuntu-24.04
+    # Los tres pasos del agente suman 300 min; el resto es para la descarga y
+    # las compuertas.
+    timeout-minutes: 350
     strategy:
       fail-fast: false
       max-parallel: 8
@@ -383,6 +393,7 @@ jobs:
     needs: vigilar
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       lista: ${{ steps.prs.outputs.lista }}
     steps:
@@ -415,9 +426,10 @@ jobs:
       PR_TOKEN: ${{ secrets.PR_TOKEN }}
 
   salud:
-    needs: [planear, vigilar, revisar]
+    needs: [planear, vigilar, prs, revisar]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       actions: write
       issues: write
@@ -427,12 +439,13 @@ jobs:
       - name: Reintentar una vez si falló
         # Casi todas las fallas son de red o de la fuente oficial: se reintenta
         # solo, una vez. Si el reintento también falla, la siguiente vigilancia
-        # semanal lo vuelve a intentar.
-        if: (needs.planear.result == 'failure' || needs.vigilar.result == 'failure' || needs.revisar.result == 'failure') && inputs.reintento != true
-        run: gh workflow run vigilar-estatales.yml -R "$GITHUB_REPOSITORY" --ref main -f reintento=true
+        # semanal lo vuelve a intentar. Un job que agota su tiempo termina
+        # `cancelled` sin que la corrida esté cancelada: también es una falla.
+        if: ${{ !cancelled() && (contains(fromJSON('["failure","cancelled"]'), needs.planear.result) || contains(fromJSON('["failure","cancelled"]'), needs.vigilar.result) || contains(fromJSON('["failure","cancelled"]'), needs.prs.result) || contains(fromJSON('["failure","cancelled"]'), needs.revisar.result)) && inputs.reintento != true }}
+        run: gh workflow run vigilar-estatales.yml -R "$GITHUB_REPOSITORY" --ref main -f reintento=true -f origen=salud
 
       - name: Dejar constancia si también falló el reintento
-        if: (needs.planear.result == 'failure' || needs.vigilar.result == 'failure' || needs.revisar.result == 'failure') && inputs.reintento == true
+        if: ${{ !cancelled() && (contains(fromJSON('["failure","cancelled"]'), needs.planear.result) || contains(fromJSON('["failure","cancelled"]'), needs.vigilar.result) || contains(fromJSON('["failure","cancelled"]'), needs.prs.result) || contains(fromJSON('["failure","cancelled"]'), needs.revisar.result)) && inputs.reintento == true }}
         run: |
           titulo="🚨 Falló: ${{ github.workflow }}"
           url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
@@ -467,3 +480,14 @@ jobs:
           # No falla la vigilancia: sus datos ya están publicados; solo la web se
           # queda atrás hasta el siguiente aviso o push.
           echo "::warning::No se pudo avisar a constitucion-web tras tres intentos."
+
+  estado:
+    # El supervisor (OpenCodice/supervisor) lee el nombre de este job para saber si quedó trabajo pendiente.
+    name: "estado pendiente=[false]"
+    needs: [planear, vigilar, prs, revisar, salud]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - run: 'true'
