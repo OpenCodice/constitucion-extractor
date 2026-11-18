@@ -136,14 +136,14 @@ publicar_arreglo() {
   fi
   titulo="$(campo titulo_commit)"
   git add -A
-  git -c user.name="${GITHUB_ACTOR:-opencodice-ci}" \
-      -c user.email="${GITHUB_ACTOR_ID:-0}+${GITHUB_ACTOR:-opencodice-ci}@users.noreply.github.com" \
+  git -c user.name="Claude (agente OpenCodice)" \
+      -c user.email="noreply@anthropic.com" \
       commit -q -m "Reparación automática: ${titulo:-ajuste del extractor a un cambio de formato del PDF}"
   destino="${EXTRACTOR_PUSH_URL:-https://x-access-token:${EXTRACTOR_TOKEN:-}@github.com/${EXTRACTOR_SLUG:-}.git}"
   # Otras corridas (un job por estado) pueden haber publicado su propio
   # arreglo mientras tanto: se rebasa sobre el main más reciente.
-  export GIT_AUTHOR_NAME="${GITHUB_ACTOR:-opencodice-ci}" GIT_COMMITTER_NAME="${GITHUB_ACTOR:-opencodice-ci}"
-  export GIT_AUTHOR_EMAIL="${GITHUB_ACTOR_ID:-0}+${GITHUB_ACTOR:-opencodice-ci}@users.noreply.github.com"
+  export GIT_AUTHOR_NAME="Claude (agente OpenCodice)" GIT_COMMITTER_NAME="Claude (agente OpenCodice)"
+  export GIT_AUTHOR_EMAIL="noreply@anthropic.com"
   export GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
   # Con ocho jobs en paralelo y los registros de verificaciones, main puede
   # avanzar entre el pull y el push: se reintenta antes de dar el arreglo por
