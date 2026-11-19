@@ -33,7 +33,7 @@ jobs:
       - run: pip install -q -r requirements.txt pytest
       - run: python -m pytest -q
 
-  scheduler:
+  workers:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -46,6 +46,8 @@ jobs:
       - run: node --check scheduler/worker.js && node --check egress-mx/worker.js
       - run: node --test
         working-directory: scheduler
+      - run: node --test
+        working-directory: egress-mx
 
   workflows:
     runs-on: ubuntu-latest

@@ -6,6 +6,10 @@
 // La lista son estos dominios más los de egress-mx/permitidos.json en main de
 // este repo, que la ronda de expansión de fiscal-extractor amplía sin
 // desplegar el Worker. Si ese archivo no se puede leer, quedan estos.
+//
+// GET /salud, con el mismo token, dice si el Worker vive, cuántos dominios
+// tiene su lista y desde qué centro de datos sale; no descarga de ninguna
+// fuente.
 
 const PERMITIDOS = new Set([
   "legislacion.edomex.gob.mx",
@@ -34,10 +38,11 @@ const LISTA_TTL = 2 * 60_000;
 // escribir en él, no podría abrir el Worker hacia cualquier sitio.
 const DOMINIO_MX = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+mx$/;
 
-let lista = { dominios: PERMITIDOS, hasta: 0 };
+// `leida`: si el último intento de leer el archivo lo consiguió.
+let lista = { dominios: PERMITIDOS, hasta: 0, leida: false };
 
 async function permitidos(env) {
-  if (Date.now() < lista.hasta) return lista.dominios;
+  if (Date.now() < lista.hasta) return lista;
   try {
     // env.LISTA_URL la sustituye para probar con `wrangler dev`.
     const r = await fetch(env.LISTA_URL || LISTA_URL, {
@@ -48,13 +53,50 @@ async function permitidos(env) {
     const datos = await r.json();
     const extra = (Array.isArray(datos?.dominios) ? datos.dominios : [])
       .filter((d) => typeof d === "string" && DOMINIO_MX.test(d));
-    lista = { dominios: new Set([...PERMITIDOS, ...extra]), hasta: Date.now() + LISTA_TTL };
+    lista = { dominios: new Set([...PERMITIDOS, ...extra]), hasta: Date.now() + LISTA_TTL, leida: true };
   } catch {
     // Sin el archivo sigue la última lista leída (o la de arriba), y se vuelve
     // a intentar en un minuto.
-    lista = { dominios: lista.dominios, hasta: Date.now() + 60_000 };
+    lista = { dominios: lista.dominios, hasta: Date.now() + 60_000, leida: false };
   }
-  return lista.dominios;
+  return lista;
+}
+
+// Los centros de datos de Cloudflare en México (códigos IATA).
+export const COLOS_MX = new Set(["MEX", "QRO", "GDL"]);
+const TRAZA_URL = "https://www.cloudflare.com/cdn-cgi/trace";
+
+// Dónde corre el Worker. `request.cf` no sirve: describe el centro de datos
+// al que llegó quien llama, y con `placement` el Worker corre en otro. Una
+// petición saliente a la traza de Cloudflare la atiende el centro de datos
+// desde el que sale, que es lo que ven las fuentes. De su `loc` no se deduce
+// nada: es la geolocalización de la IP que pide, no el lugar del Worker.
+async function salida(env) {
+  try {
+    // env.TRAZA_URL la sustituye para probar con `wrangler dev`.
+    const r = await fetch(env.TRAZA_URL || TRAZA_URL, { signal: AbortSignal.timeout(5_000) });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const colo = /^colo=([A-Z]{3})\s*$/m.exec(await r.text())?.[1] ?? null;
+    return { colo, pais: COLOS_MX.has(colo) ? "MX" : null };
+  } catch (e) {
+    console.error(`traza: ${e?.name}: ${e?.message}`);
+    return { colo: null, pais: null };
+  }
+}
+
+async function salud(request, env) {
+  const [{ dominios, leida }, { colo, pais }] = await Promise.all([permitidos(env), salida(env)]);
+  return Response.json({
+    ok: true,
+    permitidos: dominios.size,
+    // false: no se pudo leer permitidos.json y `permitidos` cuenta la última
+    // lista leída o la integrada.
+    lista_leida: leida,
+    colo,
+    // "MX" solo si `colo` es un centro de datos mexicano; si no, null.
+    pais,
+    colo_entrada: request.cf?.colo ?? null,
+  });
 }
 
 function iguales(a, b) {
@@ -72,14 +114,18 @@ export default {
     if (![env.TOKEN, env.TOKEN_ARCHIVO].some((t) => t && iguales(token, t))) {
       return new Response("no autorizado\n", { status: 401 });
     }
-    const destino = new URL(request.url).searchParams.get("url");
+    const pedida = new URL(request.url);
+    if (pedida.pathname === "/salud") {
+      return request.method === "GET" ? salud(request, env) : new Response("método no permitido\n", { status: 405 });
+    }
+    const destino = pedida.searchParams.get("url");
     let url;
     try {
       url = new URL(destino ?? "");
     } catch {
       return new Response("falta ?url=\n", { status: 400 });
     }
-    const dominios = await permitidos(env);
+    const { dominios } = await permitidos(env);
     if (!["https:", "http:"].includes(url.protocol) || !dominios.has(url.hostname)) {
       return new Response(`dominio no permitido: ${url.hostname}\n`, { status: 403 });
     }
