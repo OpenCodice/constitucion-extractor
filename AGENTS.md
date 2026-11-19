@@ -51,33 +51,48 @@ está mal, se corrige aquí.
   no envían; los usan el resolver y la descarga de la vigilancia.
 - `scheduler/` — Worker de Cloudflare, el reloj del sistema (el cron de GitHub
   Actions dejó de disparar y no es confiable). Tiene un solo Cron Trigger,
-  cada 15 minutos, y tres responsabilidades: lanzar `supervisor.yml` de
+  cada 15 minutos, y cuatro responsabilidades: lanzar `supervisor.yml` de
   `OpenCodice/supervisor` (`origen=scheduler`, con reintentos en el mismo
   tic), ser su hombre muerto (si `supervisor.yml` lleva 3 horas sin una
   corrida exitosa, abre el issue «🚨 El supervisor no corre» en su repo y lo
-  cierra cuando vuelve) y avisar, en el issue «🔑 El token del scheduler
-  vence el <fecha>», cuando a su propio token de GitHub le faltan menos de 30
-  días. No lanza nada más: los horarios de las vigilancias y
-  de todo lo demás están en `cadenas.toml` del supervisor. No guarda estado
-  (un tic no depende del anterior) y el lanzamiento y el hombre muerto no
-  dependen uno del otro. Sus pruebas (`node --test` en `scheduler/`) corren
-  el tic contra un GitHub simulado. Lo despliega `desplegar-workers.yml`; ver
-  su README.
+  cierra cuando vuelve), pedir su reparación (si sus últimas 3 corridas
+  terminadas fallaron, lanza `reparar-infra.yml` del supervisor con
+  `huella=supervisor`, `repo=supervisor`, `workflow=supervisor.yml`,
+  `corrida=<la última fallida>` y `origen=scheduler`; como mucho una a la vez
+  y 2 cada 24 horas, contadas en los títulos de esas corridas) y avisar, en
+  el issue «🔑 El token del scheduler vence el <fecha>», cuando a su propio
+  token de GitHub le faltan menos de 30 días. No lanza nada más: los horarios
+  de las vigilancias y de todo lo demás están en `cadenas.toml` del
+  supervisor. No guarda estado (un tic no depende del anterior) y el
+  lanzamiento, el hombre muerto y la reparación no dependen uno del otro. Sus
+  pruebas (`node --test` en `scheduler/`) corren el tic contra un GitHub
+  simulado. Lo despliega `desplegar-workers.yml`; ver su README.
 - `.github/workflows/desplegar-workers.yml` — en cada push a main que toca
-  `scheduler/`: `node --check`, `node --test`, `wrangler deploy --dry-run` y,
-  si pasan, `wrangler deploy` y la comprobación de que hay un despliegue nuevo.
-  Sin los secrets de repo `CLOUDFLARE_API_TOKEN` y `CLOUDFLARE_ACCOUNT_ID`
-  termina con un aviso y no despliega. No despliega `egress-mx`.
+  `scheduler/` o `egress-mx/` (salvo `permitidos.json`), un job por Worker:
+  `node --check`, `node --test`, `wrangler deploy --dry-run` y, si pasan,
+  `scripts/desplegar_worker.sh`, que despliega solo si el código no es el que
+  Cloudflare ya tiene activo (cada versión lleva de etiqueta la huella de
+  `worker.js` y `wrangler.jsonc`; así un cambio en un Worker no republica el
+  otro) y comprueba que hay un despliegue nuevo. A `egress-mx`, que es un
+  proxy autenticado, le hace después una prueba de humo con `EGRESS_MX_TOKEN`
+  (401 sin token, 403 fuera de la lista, `/salud` en 200) y, si falla, vuelve
+  a la versión anterior con `wrangler rollback` y la corrida falla. Sin los
+  secrets de repo `CLOUDFLARE_API_TOKEN` y `CLOUDFLARE_ACCOUNT_ID` termina
+  con un aviso y no despliega.
 - `.github/workflows/tests.yml` — en cada push a main y en cada PR: la suite
-  de `pytest` completa, las pruebas del `scheduler`, `actionlint` sobre todos
-  los workflows y el lint de workflows del supervisor
+  de `pytest` completa, las pruebas de los dos Workers, `actionlint` sobre
+  todos los workflows y el lint de workflows del supervisor
   (`OpenCodice/supervisor`, `supervisor/lint_workflows.py`).
 - `egress-mx/` — Worker de Cloudflare que descarga desde México las fuentes
   cuyos sitios rechazan IP extranjeras (los estados con `"via": "mx"` en su
-  `RESOLVER`). Su código se despliega a mano (es un proxy autenticado: ningún
-  workflow lo publica); su lista de dominios es
-  `egress-mx/permitidos.json`, que lee de main sin desplegarse y que la ronda
-  de expansión de fiscal-extractor amplía sola. Ver su README.
+  `RESOLVER`). Solo atiende a quien trae su token y solo hacia su lista de
+  dominios: `egress-mx/permitidos.json`, que lee de main sin desplegarse y que
+  la ronda de expansión de fiscal-extractor amplía sola. `GET /salud` (con el
+  token) dice si vive, cuántos dominios tiene y desde qué centro de datos
+  sale (`pais: "MX"` cuando es uno mexicano). Su código lo despliega
+  `desplegar-workers.yml`, con prueba de humo y vuelta atrás. Sus pruebas
+  (`node --test` en `egress-mx/`) lo corren con la red simulada. Ver su
+  README.
 - `scripts/pr_summary.py` — cuerpo del PR de vigilancia.
 - `scripts/commits_constitucion.py` — hace el commit (o los dos) del documento
   regenerado, con sus trailers (con `--verificadas`, no publica un documento
@@ -154,7 +169,8 @@ mismo**: nada de `gh workflow run`, `gh run rerun`, `…/dispatches` ni
 Tampoco reintentan, abren issues por sus fallas ni avisan a la web: eso
 también es del supervisor. Llamar a `revisar-pr.yml` con `workflow_call` no es
 lanzar. La única excepción del repo es el Worker `scheduler`, que lanza solo
-`supervisor.yml`.
+`supervisor.yml` y, cuando el supervisor lleva 3 fallas seguidas,
+`reparar-infra.yml` de su repo.
 
 Para que el supervisor pueda leer las corridas por la API de GitHub, los
 workflows que lanza (`vigilar-cpeum.yml`, `vigilar-estatales.yml`,

@@ -2,15 +2,21 @@ name: Desplegar Workers
 # El supervisor lee los inputs de aquí: la API no los devuelve.
 run-name: "desplegar-workers origen=[${{ inputs.origen }}]"
 
-# Despliega el Worker `scheduler` cuando cambia en main, después de sus
-# pruebas, y comprueba que Cloudflare registró el despliegue. `egress-mx` no
-# se despliega desde aquí: es un proxy autenticado y un error suyo lo dejaría
-# abierto, así que se sigue desplegando a mano (ver egress-mx/README.md).
+# Despliega los Workers `scheduler` y `egress-mx` cuando cambian en main,
+# después de sus pruebas, y comprueba que Cloudflare registró el despliegue.
+# Cada uno se despliega solo si su código no es el que ya está activo
+# (scripts/desplegar_worker.sh), así que un cambio en uno no republica el otro.
+#
+# `egress-mx` es un proxy autenticado: un error suyo podría dejarlo abierto.
+# Por eso, tras desplegarlo, se le hace una prueba de humo (rechaza a quien no
+# trae el token y los dominios fuera de su lista, y contesta /salud) y, si no
+# la pasa, se vuelve a la versión anterior y la corrida falla.
 
 on:
   push:
     branches: [main]
-    paths: ['scheduler/**']
+    # permitidos.json no pide despliegue: el Worker lo lee de main.
+    paths: ['scheduler/**', 'egress-mx/**', '!egress-mx/permitidos.json', 'scripts/desplegar_worker.sh']
   workflow_dispatch:
     inputs:
       origen:
@@ -33,10 +39,6 @@ jobs:
   scheduler:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    defaults:
-      run:
-        shell: bash
-        working-directory: scheduler
     steps:
       - uses: actions/checkout@v5
         with:
@@ -46,8 +48,11 @@ jobs:
           node-version: '22'
 
       - run: node --check worker.js
+        working-directory: scheduler
       - run: node --test
+        working-directory: scheduler
       - run: npx --yes "$WRANGLER" deploy --dry-run
+        working-directory: scheduler
 
       - name: ¿Hay credenciales de Cloudflare?
         id: cloudflare
@@ -68,27 +73,114 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: scripts/desplegar_worker.sh scheduler
+
+  egress-mx:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      EGRESS_URL: https://egress-mx.danielcardeenas.workers.dev
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - run: node --check worker.js
+        working-directory: egress-mx
+      - run: node --test
+        working-directory: egress-mx
+      - run: npx --yes "$WRANGLER" deploy --dry-run
+        working-directory: egress-mx
+
+      - name: ¿Hay credenciales de Cloudflare y token para la prueba de humo?
+        id: cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          EGRESS_MX_TOKEN: ${{ secrets.EGRESS_MX_TOKEN }}
         run: |
-          despliegues() {
-            npx --yes "$WRANGLER" deployments list --json \
-              | node -e 'const d = JSON.parse(require("fs").readFileSync(0, "utf8")); console.log(d.map((x) => x.id).sort().join("\n"))'
-          }
-          despliegues > /tmp/antes.txt
-          npx --yes "$WRANGLER" deploy
-          despliegues > /tmp/despues.txt
-          nuevo=$(comm -13 /tmp/antes.txt /tmp/despues.txt)
-          if [ -z "$nuevo" ]; then
-            echo "::error::wrangler deploy terminó bien pero Cloudflare no lista ningún despliegue nuevo del Worker scheduler."
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "listo=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Faltan los secrets CLOUDFLARE_API_TOKEN y CLOUDFLARE_ACCOUNT_ID de este repo: el Worker egress-mx NO se desplegó."
+            exit 0
+          fi
+          # Sin el token no se puede comprobar que el proxy quedó cerrado, y
+          # sin comprobarlo no se despliega.
+          if [ -z "$EGRESS_MX_TOKEN" ]; then
+            echo "::error::Falta el secret EGRESS_MX_TOKEN: sin la prueba de humo, egress-mx no se despliega."
             exit 1
           fi
-          echo "Despliegue nuevo: $nuevo"
+          echo "listo=true" >> "$GITHUB_OUTPUT"
+
+      - name: Desplegar y comprobar el despliegue
+        id: desplegar
+        # Solo main: una corrida a mano desde otra rama no publica su código.
+        if: steps.cloudflare.outputs.listo == 'true' && github.ref == 'refs/heads/main'
+        timeout-minutes: 5
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: scripts/desplegar_worker.sh egress-mx
+
+      # El nombre empieza por «Compuerta» a propósito: el agente que repara la
+      # infraestructura no puede cambiar los pasos que se llaman así.
+      - name: 'Compuerta: prueba de humo; si falla, volver a la versión anterior'
+        # También si el paso anterior falló a medias: desde que intenta
+        # desplegar, Cloudflare puede tener el código nuevo.
+        if: ${{ always() && steps.desplegar.outputs.intentado == 'true' }}
+        timeout-minutes: 8
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          EGRESS_MX_TOKEN: ${{ secrets.EGRESS_MX_TOKEN }}
+          ANTERIOR: ${{ steps.desplegar.outputs.anterior }}
+        working-directory: egress-mx
+        run: |
+          # codigo <esperado> <descripción> <argumentos de curl…>
+          codigo() {
+            local esperado=$1 que=$2 obtenido
+            shift 2
+            obtenido=$(curl -sS --max-time 10 -o /tmp/humo.txt -w '%{http_code}' "$@") || obtenido=000
+            [ "$obtenido" = "$esperado" ] && return 0
+            echo "$que: se esperaba $esperado y contestó $obtenido"
+            return 1
+          }
+          senado='url=https%3A%2F%2Fwww.senado.gob.mx%2F'
+          humo() {
+            codigo 401 "sin token, un dominio de la lista" "$EGRESS_URL/?$senado" \
+              && codigo 401 "sin token, /salud" "$EGRESS_URL/salud" \
+              && codigo 401 "con un token que no es" -H "Authorization: Bearer no-es-el-token" "$EGRESS_URL/?$senado" \
+              && codigo 403 "con token, un dominio fuera de la lista" -H "Authorization: Bearer $EGRESS_MX_TOKEN" "$EGRESS_URL/?url=https%3A%2F%2Fexample.com%2F" \
+              && codigo 200 "con token, /salud" -H "Authorization: Bearer $EGRESS_MX_TOKEN" "$EGRESS_URL/salud" \
+              && jq -e '.ok == true and (.permitidos | type == "number" and . > 0)' /tmp/humo.txt > /dev/null
+          }
+          # El despliegue tarda unos segundos en llegar a todos los centros de
+          # datos: mientras tanto puede contestar la versión anterior.
+          for intento in 1 2 3 4 5; do
+            if humo; then
+              echo "Prueba de humo: OK. /salud: $(cat /tmp/humo.txt)"
+              exit 0
+            fi
+            echo "Intento $intento: la prueba de humo no pasó."
+            sleep 10
+          done
+          echo "::error::El Worker egress-mx desplegado no pasó la prueba de humo: se vuelve a la versión anterior (${ANTERIOR:-la previa})."
+          if [ -n "$ANTERIOR" ]; then
+            npx --yes "$WRANGLER" rollback "$ANTERIOR" --yes --message "La prueba de humo de $GITHUB_SHA falló"
+          else
+            npx --yes "$WRANGLER" rollback --yes --message "La prueba de humo de $GITHUB_SHA falló"
+          fi
+          exit 1
 
   estado:
     # El supervisor (OpenCodice/supervisor) lee el nombre de este job para saber
     # si quedó otra tanda, y el artefacto `cadena` para saber cómo terminó cada
     # job y qué pidió.
     name: "estado pendiente=[false]"
-    needs: [scheduler]
+    needs: [scheduler, egress-mx]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
