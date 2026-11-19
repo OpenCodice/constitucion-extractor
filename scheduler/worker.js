@@ -2,8 +2,10 @@
 // de disparar sin aviso (además, en repos públicos se apaga tras 60 días sin
 // commits), así que el tic sale de aquí: cada 15 minutos lanza al supervisor
 // con la API de GitHub (workflow_dispatch), y el supervisor decide qué más
-// tiene que correr. También lo vigila: si deja de correr, abre un issue. Y
-// avisa, en otro issue, un mes antes de que venza su propio token.
+// tiene que correr. También lo vigila: si deja de correr, abre un issue, y si
+// falla una y otra vez pide su reparación (el supervisor repara a los demás,
+// pero no puede observarse cuando no corre). Y avisa, en otro issue, un mes
+// antes de que venza su propio token.
 
 const ORG = "OpenCodice";
 const ORIGEN = "scheduler";
@@ -20,6 +22,19 @@ export const SUPERVISOR = { repo: "supervisor", workflow: "supervisor.yml", inpu
 export const TITULO_HOMBRE_MUERTO = "🚨 El supervisor no corre";
 const MAX_HORAS_SIN_SUPERVISOR = 3;
 const SILENCIO_AVISO_HORAS = 6;
+
+// Reparación del supervisor: cuando sus últimas FALLAS_SEGUIDAS corridas
+// terminadas fallaron, el Worker lanza el agente de infraestructura sobre la
+// última. Los topes se leen de las corridas de ese workflow, cuyo título lleva
+// los inputs: una a la vez, MAX_REPARACIONES_DIA cada 24 horas y ninguna
+// hasta que el supervisor haya corrido después de la anterior.
+export const REPARACION = { repo: "supervisor", workflow: "reparar-infra.yml", huella: "supervisor" };
+const FALLAS_SEGUIDAS = 3;
+const MAX_REPARACIONES_DIA = 2;
+// Una corrida cancelada o saltada no dice si el supervisor funciona.
+const SIN_VEREDICTO = new Set(["cancelled", "skipped"]);
+// Agotar el tiempo o no poder arrancar también es no correr bien.
+const FALLIDA = new Set(["failure", "timed_out", "startup_failure"]);
 
 // Todo cabe con holgura antes del tic siguiente, aunque cada intento agote su
 // tiempo.
@@ -74,6 +89,23 @@ export function decidirHombreMuerto({ ahora, ultimaExitosa, issue }) {
   if (vivo) return issue ? "cerrar" : "nada";
   if (!issue) return "abrir";
   return ahora - issue.ultimoAviso >= SILENCIO_AVISO_HORAS * HORA_MS ? "comentar" : "nada";
+}
+
+// A qué corrida del supervisor hay que mandar al agente de infraestructura:
+// su id, o null si no toca. `terminadas` son las corridas terminadas de
+// supervisor.yml y `reparaciones` (una función, para no pedirlas si el
+// supervisor no está roto), las últimas de reparar-infra.yml; las dos, de la
+// más nueva a la más vieja.
+export async function decidirReparacion({ ahora, terminadas, reparaciones }) {
+  const ultimas = terminadas.filter((c) => !SIN_VEREDICTO.has(c.conclusion)).slice(0, FALLAS_SEGUIDAS);
+  if (ultimas.length < FALLAS_SEGUIDAS || !ultimas.every((c) => FALLIDA.has(c.conclusion))) return null;
+  const propias = (await reparaciones()).filter((c) => (c.display_title ?? "").includes(`huella=[${REPARACION.huella}]`));
+  if (propias.some((c) => c.status !== "completed")) return null;
+  // Una reparación se juzga con una corrida que empezó después de ella.
+  const empezo = Date.parse(ultimas[0].run_started_at ?? ultimas[0].created_at);
+  if (propias.some((c) => Date.parse(c.updated_at) >= empezo)) return null;
+  if (propias.filter((c) => ahora - Date.parse(c.created_at) < DIA_MS).length >= MAX_REPARACIONES_DIA) return null;
+  return ultimas[0].id;
 }
 
 // Una falla de red, un límite de peticiones o un error del servidor pueden
@@ -134,6 +166,33 @@ async function lanzarSupervisor(github, esperar) {
 }
 
 const REPO_SUPERVISOR = `/repos/${ORG}/${SUPERVISOR.repo}`;
+
+// Devuelve el id de la corrida que mandó reparar, o null. Un lanzamiento que
+// falla no se reintenta aquí: el tic siguiente vuelve a decidir.
+async function repararSupervisor(github, ahora) {
+  const repo = REPO_SUPERVISOR;
+  // De sobra para hallar FALLAS_SEGUIDAS con veredicto entre canceladas.
+  const { workflow_runs: terminadas } = await github(
+    `${repo}/actions/workflows/${SUPERVISOR.workflow}/runs?status=completed&per_page=20`);
+  const corrida = await decidirReparacion({
+    ahora,
+    terminadas,
+    reparaciones: async () => (await github(`${repo}/actions/workflows/${REPARACION.workflow}/runs?per_page=100`)).workflow_runs,
+  });
+  if (corrida == null) return null;
+  await github(`${repo}/actions/workflows/${REPARACION.workflow}/dispatches`, {
+    method: "POST",
+    body: JSON.stringify({
+      ref: "main",
+      inputs: {
+        huella: REPARACION.huella, repo: SUPERVISOR.repo, workflow: SUPERVISOR.workflow, corrida: String(corrida),
+        origen: ORIGEN,
+      },
+    }),
+  });
+  console.log(`pedida la reparación del supervisor (corrida ${corrida})`);
+  return corrida;
+}
 
 // Devuelve los issues abiertos que leyó, para que el aviso de vencimiento no
 // tenga que pedirlos otra vez.
@@ -222,24 +281,28 @@ async function avisoVencimiento(github, ahora, token, abiertos) {
   if (accion !== "nada") console.log(`vencimiento del token: ${accion}`);
 }
 
-// Un tic: lanza al supervisor y revisa el hombre muerto, a la vez y cada uno
-// por su cuenta, para que ni la falla ni la tardanza de uno alcancen al otro.
+// Un tic: lanza al supervisor, revisa el hombre muerto y mira si hay que
+// mandar a reparar al supervisor, a la vez y cada uno por su cuenta, para que
+// ni la falla ni la tardanza de uno alcancen a los otros.
 // Después, también por su cuenta, mira cuándo vence el token con lo que esas
 // respuestas dijeron de él. No lee nada de un tic anterior: el siguiente
 // empieza igual, haya pasado lo que haya pasado en este.
 export async function tic(env, { ahora = Date.now(), esperar = dormir } = {}) {
   const { github, token } = cliente(env);
-  const [lanzamiento, aviso] = await Promise.allSettled([lanzarSupervisor(github, esperar), hombreMuerto(github, ahora)]);
+  const [lanzamiento, aviso, reparacion] = await Promise.allSettled([
+    lanzarSupervisor(github, esperar), hombreMuerto(github, ahora), repararSupervisor(github, ahora)]);
   if (lanzamiento.status === "rejected") console.error("no se pudo lanzar al supervisor:", lanzamiento.reason);
   // Con un token sin permiso de Issues (403) no hay dónde avisar: queda en
   // los registros.
   if (aviso.status === "rejected") console.error("hombre muerto:", aviso.reason);
+  if (reparacion.status === "rejected") console.error("reparación del supervisor:", reparacion.reason);
   const [vencimiento] = await Promise.allSettled([
     avisoVencimiento(github, ahora, token, aviso.status === "fulfilled" ? aviso.value : null)]);
   if (vencimiento.status === "rejected") console.error("vencimiento del token:", vencimiento.reason);
   return {
     lanzado: lanzamiento.status === "fulfilled",
     hombreMuerto: aviso.status === "fulfilled",
+    reparacion: reparacion.status === "fulfilled",
     vencimiento: vencimiento.status === "fulfilled",
   };
 }

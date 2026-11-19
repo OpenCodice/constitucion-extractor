@@ -3,12 +3,24 @@
 Worker de Cloudflare que hace de reloj de OpenCodice. Sustituye al cron de
 GitHub Actions, que es de mejor esfuerzo, dejó de disparar sin aviso y, en
 repos públicos, se apaga tras 60 días sin commits. Tiene un solo Cron Trigger
-(`*/15 * * * *`) y hace tres cosas en cada tic:
+(`*/15 * * * *`) y hace cuatro cosas en cada tic:
 
 - Lanza `supervisor.yml` de `OpenCodice/supervisor` (`workflow_dispatch` por
-  la API de GitHub, con `origen=scheduler`). Es lo único que lanza: qué más
-  tiene que correr y cuándo lo decide el supervisor, con los horarios de su
-  `cadenas.toml`.
+  la API de GitHub, con `origen=scheduler`). Qué más tiene que correr y
+  cuándo lo decide el supervisor, con los horarios de su `cadenas.toml`.
+- Pide la reparación del supervisor: él repara a los demás, pero no puede
+  observarse cuando no corre. Si sus últimas 3 corridas terminadas fallaron
+  (`failure`, `timed_out` o `startup_failure`; las canceladas y las saltadas
+  no cuentan, ni a favor ni en contra), lanza `reparar-infra.yml` de
+  `OpenCodice/supervisor` con `huella=supervisor`, `repo=supervisor`,
+  `workflow=supervisor.yml`, `corrida=<id de la última fallida>` y
+  `origen=scheduler`. Es lo único que lanza además del supervisor. Los topes
+  salen de las corridas de `reparar-infra.yml`, cuyo título lleva los inputs
+  (`huella=[supervisor]`, las lance quien las lance): no pide otra si hay una
+  en curso o en cola, si ya hubo 2 en las últimas 24 horas, o si el
+  supervisor aún no ha terminado una corrida que empezara después de la
+  última reparación. Si el lanzamiento falla no se reintenta: el tic
+  siguiente vuelve a decidir.
 - Hombre muerto: si `supervisor.yml` no tiene ninguna corrida exitosa en las
   últimas 3 horas, abre en `OpenCodice/supervisor` el issue
   «🚨 El supervisor no corre» (o comenta en el que ya esté abierto, como mucho
@@ -32,9 +44,11 @@ Todo el sistema depende de este tic, así que:
   de GitHub se reintenta tres veces en el mismo tic (a los 2, 5 y 15 s); un
   401, 403, 404 o 422 no, porque no va a pasar al reintentar. Cada petición
   tiene 20 s para contestar.
-- El lanzamiento y el hombre muerto corren a la vez y cada uno por su cuenta:
-  si el lanzamiento falla tras sus reintentos, el hombre muerto corre igual, y
-  al revés. El aviso de vencimiento va después y también por su cuenta: no
+- El lanzamiento, el hombre muerto y la reparación corren a la vez y cada uno
+  por su cuenta: si el lanzamiento falla tras sus reintentos, los otros dos
+  corren igual, y al revés. Un tic sano gasta una petición en mirar las
+  últimas corridas del supervisor; las de `reparar-infra.yml` solo se leen
+  si lleva 3 fallas. El aviso de vencimiento va después y también por su cuenta: no
   hace peticiones de más (usa la cabecera y la lista de issues que el hombre
   muerto ya leyó; si este falló, la pide él) y una falla suya solo queda en
   los registros.
@@ -47,8 +61,9 @@ No expone URL. Los registros están en Workers Logs del panel de Cloudflare.
 
 Token: secret `GITHUB_TOKEN`, un fine-grained PAT `opencodice-scheduler` de la
 organización OpenCodice con Actions: read and write e Issues: read and write
-en `OpenCodice/supervisor` (sin Issues, el aviso del hombre muerto falla con
-403, queda en los registros y el lanzamiento sigue). Si el token vence, fallan
+en `OpenCodice/supervisor` (Actions le basta también para pedir la
+reparación; sin Issues, el aviso del hombre muerto falla con 403, queda en los
+registros y el lanzamiento sigue). Si el token vence, fallan
 las dos cosas a la vez (por eso el aviso sale 30 días antes); `supervisor.yml`
 tiene además un cron propio de respaldo. Vence al año de crearse; al
 renovarlo: `npx wrangler secret put GITHUB_TOKEN` desde esta carpeta (no hace
@@ -57,14 +72,17 @@ falta desplegar).
 ## Pruebas y despliegue
 
 ```bash
-node --test                      # el tic contra un GitHub simulado, hombre muerto, vencimiento, cron
+node --test                      # el tic contra un GitHub simulado, hombre muerto, reparación, vencimiento, cron
 npx wrangler deploy --dry-run
 ```
 
 Lo despliega `.github/workflows/desplegar-workers.yml` en cada push a main que
 toque esta carpeta, después de esas pruebas, y comprueba con `wrangler
-deployments list` que hay un despliegue nuevo. Necesita los secrets de repo
+deployments list` que hay un despliegue nuevo. Solo despliega si `worker.js` o
+`wrangler.jsonc` no son los que Cloudflare ya tiene activos
+(`scripts/desplegar_worker.sh` etiqueta cada versión con la huella de su
+código), así que una corrida por un cambio en `egress-mx` no lo republica. Necesita los secrets de repo
 `CLOUDFLARE_API_TOKEN` (permiso Workers Scripts: Edit) y
 `CLOUDFLARE_ACCOUNT_ID`; mientras falten, el workflow termina con un aviso y
 sin desplegar, y hay que hacerlo a mano con `npx wrangler deploy`. Desplegar no
-toca el secret `GITHUB_TOKEN` del Worker. `egress-mx` no se despliega desde CI.
+toca el secret `GITHUB_TOKEN` del Worker.
