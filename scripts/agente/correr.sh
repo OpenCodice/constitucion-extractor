@@ -19,6 +19,7 @@ mkdir -p "$TRABAJO"
 rm -f "$TRABAJO/veredicto.json" "$TRABAJO/alta"
 cd "$EXTRACTOR"
 export PYTHONPATH="$EXTRACTOR"
+source scripts/agente/sesion.sh
 
 git -C "$OUT" status --porcelain -- articulos > "$TRABAJO/cambiados.txt"
 if [ ! -s "$TRABAJO/cambiados.txt" ]; then
@@ -34,12 +35,13 @@ python -m extractor verificar --sin-llm --pdf "$PDF" --out "$OUT" --perfil "$PER
 
 command -v claude > /dev/null || npm install -g @anthropic-ai/claude-code > /dev/null
 
+DOCUMENTO="$([ "$PERFIL" = cpeum ] && echo cpeum || echo "$PERFIL/constitucion")"
+# lanzar PASO BRIEF
 lanzar() {
-  claude -p "$(cat "$1")" \
+  sesion_agente "$1" "$TRABAJO/uso.jsonl" "$2" "$DOCUMENTO" \
     --max-turns "${AGENTE_MAX_TURNOS:-120}" \
     --permission-mode acceptEdits \
     --allowedTools Bash Read Edit Write Glob Grep \
-    ${AGENTE_MODELO:+--model "$AGENTE_MODELO"} \
     >> "$TRABAJO/agente.log" 2>&1 || echo "::warning::El agente terminó con error (ver $TRABAJO/agente.log)."
 }
 
@@ -61,7 +63,7 @@ if ! git -C "$OUT" cat-file -e HEAD:./metadata/articulos.json 2>/dev/null; then
       __EXTRACTOR__="$EXTRACTOR" __OUT__="$OUT" __PDF__="$PDF" __PERFIL__="$PERFIL" \
       __BUILD__="$BUILD" __PLANEAR__="$PLANEAR" __TRABAJO_AGENTE__="$TRABAJO" __DOCUMENTO__="$DOC"
     [ -s "$REV/brief.md" ] || break
-    lanzar "$REV/brief.md"
+    lanzar revision-alta "$REV/brief.md"
   done
   tail -n 40 "$TRABAJO/agente.log" 2>/dev/null || true
   exit 0
@@ -92,5 +94,5 @@ for clave, valor in {
 (t / "brief.md").write_text(brief, encoding="utf-8")
 PY
 
-lanzar "$TRABAJO/brief.md"
+lanzar verificacion "$TRABAJO/brief.md"
 tail -n 40 "$TRABAJO/agente.log" || true

@@ -390,6 +390,20 @@ jobs:
             if [ -f /tmp/verificacion.md ]; then cat /tmp/verificacion.md; fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Uso del agente
+        # Telemetría (scripts/uso.py): tokens y costo de cada sesión, por paso.
+        if: always()
+        run: python3 -I /tmp/extractor/scripts/uso.py resumir /tmp/agente >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Guardar el uso del agente
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uso-${{ matrix.estado }}
+          path: /tmp/agente/**/uso.jsonl
+          if-no-files-found: ignore
+          retention-days: 30
+
   prs:
     # Los PR de esta vigilancia abiertos en leyes-estatales (uno por estado, y
     # los que hayan quedado de una corrida anterior): la matriz no junta las

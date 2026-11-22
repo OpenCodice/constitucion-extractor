@@ -28,6 +28,10 @@ está mal, se corrige aquí.
   `brief-revision.md` (revisión completa por bloques). `impacto.sh` +
   `brief-impacto.md`: el agente que solo juzga si cada corrección es mejora.
   `publicar_registro.sh` sube a main los registros de `verificaciones/`.
+  Toda sesión se lanza con `sesion_agente` (`sesion.sh`), que deja en el
+  `uso.jsonl` de su carpeta de trabajo el modelo, los tokens, el costo y la
+  duración (`scripts/uso.py`); el paso «Uso del agente» de cada job pone la
+  tabla por paso en su resumen y sube los `uso.jsonl` como artefacto.
 - `scripts/impacto.py` — registro de correcciones confirmadas
   (`verificaciones/impacto/*.jsonl`: documento, artículo, sha256 del PDF y del
   texto antes y después, veredicto), su exigencia sobre los commits de una
@@ -99,7 +103,8 @@ está mal, se corrige aquí.
   cuya corrección no esté confirmada); `scripts/trailers.py` los calcula y
   `scripts/validar_commits.py` los comprueba antes de fusionar (ver
   `revisar-pr.yml`). `trailers.py`, `validar_commits.py`, `validar_pr.sh`,
-  `impacto.py`, `revision.py`, `agente/impacto.sh`, `agente/brief-impacto.md`,
+  `impacto.py`, `revision.py`, `uso.py`, `agente/sesion.sh`,
+  `agente/impacto.sh`, `agente/brief-impacto.md`,
   `agente/brief_revision.py`, `agente/publicar_registro.sh` y
   `.github/workflows/revisar-pr.yml` existen idénticos en `fiscal-extractor` (y
   `tests/test_trailers.py`, `tests/test_impacto.py`): un cambio se hace en los
