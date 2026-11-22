@@ -1,4 +1,5 @@
 """Perfil de Puebla: llamadas de nota en superíndice y notas al pie de página."""
+from datetime import date
 import importlib.util
 from pathlib import Path
 
@@ -34,3 +35,13 @@ def test_resolver_ignora_constituciones_historicas():
     assert resolver_pdf.elegir(html, r["patron"], r["index_url"], r["orden"]) == (
         "https://ojp.puebla.gob.mx/media/k2/attachments/"
         "Constitucion_Politica_del_Estado_Libre_y_Soberano_de_Puebla_TEV_06032026.pdf")
+
+
+def test_version_de_la_tabla_de_reformas():
+    texto = ("Constitución Política del Estado Libre y Soberano de Puebla\nREFORMAS\n"
+             "Publicación Extracto del texto\n02/oct/1917 Que la Legislatura del Estado\n"
+             "05/jun/2025 ÚNICO. Se reforman las fracciones VII y XI del artículo\n"
+             "6/mar/2026 ÚNICO. Se reforma el primer párrafo de la fracción VII y\n"
+             "14\nCONTENIDO\nPárrafo reformado el 15/mar/2099.\n")
+    assert P.version_de(texto) == date(2026, 3, 6)
+    assert P.version_de("REFORMAS\n6/mar/2026 ÚNICO.") is None      # sin el índice que la cierra

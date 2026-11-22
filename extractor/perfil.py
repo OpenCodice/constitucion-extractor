@@ -107,6 +107,9 @@ class PerfilFuente:
     # Versión del PDF a partir de su portada (None → se usa version_re numérico,
     # o se pasa explícita por CLI si la fuente no la trae). Ver `version_date`.
     version_de: Optional[Callable[[str], Optional[date]]] = None
+    # Páginas, desde la primera, que recibe `version_de` (None = todas): hay PDF
+    # sin fecha en la portada que la traen en su tabla de reformas.
+    version_paginas: Optional[int] = 1
 
     # --- gate de validación (validate.py) ---------------------------------
     n_articulos: Optional[int] = None       # cuenta esperada (None = no exigir)
@@ -204,6 +207,7 @@ def perfil_estatal(
     page_footer_re: Optional[re.Pattern] = None,   # override (Nivel 1) si el PDF
                                                    # trae números de página sueltos
     version_de: Optional[Callable[[str], Optional[date]]] = None,
+    version_paginas: Optional[int] = 1,
     preprocess: Optional[Callable[[str], str]] = None,
     filtro_char: Optional[Callable[[dict], bool]] = None,
     notas_previas: Optional[re.Pattern] = None,
@@ -247,6 +251,7 @@ def perfil_estatal(
         fechas_de=fechas_de,
         reform_note_start_re=reform_note_start_re,
         version_de=version_de,
+        version_paginas=version_paginas,
         n_articulos=n_articulos,
         # si el encabezado repetido se cuela en el cuerpo, que el gate lo atrape
         leak_markers=header_prefixes,

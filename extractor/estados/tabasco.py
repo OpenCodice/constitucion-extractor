@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import replace
+from datetime import date
+from typing import Optional
 
-from ..perfil import perfil_estatal
+from ..perfil import perfil_estatal, version_ultima_reforma
 
 _SUFIJO = r"(?i:bis|ter|qu[aá]ter)"
 
@@ -51,6 +53,12 @@ def _preprocess(texto: str) -> str:
     return "\n".join(out)
 
 
+def _version(texto: str) -> Optional[date]:
+    """Portada: «Última reforma mediante Decreto 283, publicado en el Periódico
+    Oficial… de fecha 26 de agosto de 2026», partida en renglones."""
+    return version_ultima_reforma(" ".join(texto.split()))
+
+
 PERFIL = replace(
     perfil_estatal(
         ambito="tabasco",
@@ -65,6 +73,7 @@ PERFIL = replace(
         page_footer_re=re.compile(r"\d{1,3}$"),
         preprocess=_preprocess,
         notas_previas=_NOTA_RE,
+        version_de=_version,
     ),
     article_re=re.compile(
         r"^(?:Art[íi]culo|ART[ÍI]CULO)\s+(\d+)\s*(?:[ -]\s*(" + _SUFIJO + r"))?\s*\.\s*-?"),

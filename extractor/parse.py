@@ -126,7 +126,8 @@ def version_date(pdf_path: str, *, perfil: PerfilFuente = CPEUM) -> date | None:
     if perfil.version_de is None and perfil.version_re is None:
         return None
     with pdfplumber.open(pdf_path) as pdf:
-        head = pagina(pdf.pages[0], perfil).extract_text() or ""
+        paginas = pdf.pages[:perfil.version_paginas] if perfil.version_de else pdf.pages[:1]
+        head = "\n".join(pagina(p, perfil).extract_text() or "" for p in paginas)
     if perfil.version_de is not None:        # parser propio de la fuente (estatal)
         return perfil.version_de(head)
     m = perfil.version_re.search(head)       # federal: DOF DD-MM-YYYY

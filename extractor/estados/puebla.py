@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import re
+from datetime import date
+from typing import Optional
 
 from ..perfil import perfil_estatal
 
@@ -32,6 +34,23 @@ def _preprocess(texto: str) -> str:
     return texto
 
 
+_MESES = {m: i + 1 for i, m in enumerate(
+    ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"])}
+_PUBLICACION_RE = re.compile(r"^(\d{1,2})/ ?([a-z]{3})/ ?/?(\d{4})\b", re.MULTILINE)
+
+
+def _version(texto: str) -> Optional[date]:
+    """La portada no trae fecha: la versión es la publicación más reciente de la
+    tabla «REFORMAS» («06/mar/2026 ÚNICO. Se reforma…»), que acaba en el índice."""
+    inicio = re.search(r"^REFORMAS$", texto, re.MULTILINE)
+    fin = re.search(r"^CONTENIDO$", texto, re.MULTILINE)
+    if not inicio or not fin:
+        return None
+    fechas = [date(int(a), _MESES[m], int(d))
+              for d, m, a in _PUBLICACION_RE.findall(texto[inicio.end():fin.start()]) if m in _MESES]
+    return max(fechas, default=None)
+
+
 PERFIL = perfil_estatal(
     ambito="puebla",
     clave="pue",
@@ -44,6 +63,8 @@ PERFIL = perfil_estatal(
     filtro_char=_filtro_char,
     page_footer_re=_PIE_RE,
     preprocess=_preprocess,
+    version_de=_version,
+    version_paginas=20,
 )
 
 RESOLVER = {

@@ -3,10 +3,25 @@ from __future__ import annotations
 
 import re
 from dataclasses import replace
+from datetime import date
+from typing import Optional
 
-from ..perfil import perfil_estatal
+from ..perfil import fechas_largas, perfil_estatal
 
 _SUFIJO = r"BIS|TER|QUATER|QUINQUIES|SEXIES|SEPTIES|OCTIES|[A-G]"
+# Cada entrada de la lista de reformas que cierra el PDF: «LEY 161; B. O. Edición
+# Especial, de fecha 01 de noviembre de 2026, que…», a veces partida en renglones.
+_PUBLICACION_RE = re.compile(
+    r"^\*?LEY\s+\d+\b.{0,160}?de\s+fecha\s+\d{1,2}\s+de\s+\w+\s+de\s+\d{4}",
+    re.MULTILINE | re.DOTALL)
+
+
+def _version(texto: str) -> Optional[date]:
+    """La portada no trae fecha: la versión es la publicación más reciente de la
+    lista de reformas del final del PDF."""
+    fechas = [f for m in _PUBLICACION_RE.finditer(texto) for f in fechas_largas(m.group(0))[-1:]]
+    return max(fechas, default=None)
+
 
 PERFIL = replace(
     perfil_estatal(
@@ -22,6 +37,8 @@ PERFIL = replace(
         transitorios_re=re.compile(r"^[ \t]*T ?R ?A ?N ?S ?I ?T ?O ?R ?I ?O ?S[ \t]*$", re.MULTILINE),
         # Número de página suelto; ningún renglón del texto es solo dígitos.
         page_footer_re=re.compile(r"\d{1,3}$"),
+        version_de=_version,
+        version_paginas=None,
     ),
     # Todo encabezado cierra en ".-"; sin exigirlo, las citas "Artículo 64 de esta
     # Constitución" que abren renglón pasarían el gate monotónico.

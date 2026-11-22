@@ -1,4 +1,5 @@
 """Perfil de Sonora: sufijos latinos y con letra; citas que abren renglón; resolver por API."""
+from datetime import date
 import importlib.util
 from pathlib import Path
 
@@ -31,3 +32,15 @@ def test_resolver_api():
     url = resolver_pdf.elegir(js, r["patron"], r["index_url"], r["orden"], r["plantilla"])
     assert url == ("https://gestion.api.congresoson.gob.mx/publico/descarga"
                    "?uuid=30cd30a6-8667-4041-87ad-8ce1112c2be6")
+
+
+def test_version_de_la_lista_de_reformas():
+    texto = ("Estados Unidos Mexicanos, de la Ley 288, publicada en el B. O. 13, sección II,\n"
+             "de fecha 13 de agosto de 2027, que no abre renglón.\n"
+             "LEY 29.- B.O. No. 50 de fecha 19 de diciembre de 1923, que reforma la fracción XXIV.\n"
+             "FE DE ERRATAS. De Ley 102, B. O. 5, sección IV, de fecha 16 de enero de 2030.\n"
+             "LEY 158; B. O. 43, sección II, de fecha 28 de mayo de 2026, que se reforman.\n"
+             "LEY 161; B. O. Edición Especial, de\nfecha 01 de noviembre de 2026, que se REFORMA.\n")
+    assert P.version_de(texto) == date(2026, 11, 1)
+    assert P.version_paginas is None
+    assert P.version_de("Sin lista de reformas.") is None

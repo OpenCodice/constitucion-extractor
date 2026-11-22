@@ -1,4 +1,5 @@
 """Perfil de Tabasco: marginalia de reforma antes de cada artículo; resolver por índice."""
+from datetime import date
 import importlib.util
 from pathlib import Path
 
@@ -35,3 +36,13 @@ def test_resolver_ignora_hosting_viejo():
     assert resolver_pdf.elegir(html, r["patron"], r["index_url"], r["orden"]) == (
         "https://congresotabasco.gob.mx/wp-content/uploads/2026/08/"
         "Constitucion-Politica-del-Estado-de-Tabasco1.pdf")
+
+
+def test_version_de_la_portada_partida_en_renglones():
+    portada = ("Constitución Política del Estado Libre y Soberano de Tabasco\n"
+               "Última reforma mediante Decreto 283, publicado en el Periódico Oficial del Estado número 8762\n"
+               "Suplemento “L” de fecha 26 de agosto de 2026, mediante el cual se reforman los artículos 8 ter,\n"
+               "Reforma mediante Decreto 231, publicado en el Periódico Oficial del Estado número 8701 "
+               "Suplemento “L” de fecha 24 de enero de 2026\n")
+    assert P.version_de(portada) == date(2026, 8, 26)
+    assert P.version_paginas == 1
