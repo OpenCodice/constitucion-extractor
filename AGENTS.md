@@ -31,7 +31,10 @@ está mal, se corrige aquí.
   Toda sesión se lanza con `sesion_agente` (`sesion.sh`), que deja en el
   `uso.jsonl` de su carpeta de trabajo el modelo, los tokens, el costo y la
   duración (`scripts/uso.py`); el paso «Uso del agente» de cada job pone la
-  tabla por paso en su resumen y sube los `uso.jsonl` como artefacto.
+  tabla por paso en su resumen y sube los `uso.jsonl` como artefacto. El
+  modelo lo fija el paso (`modelo_del_paso`): Opus 5.5 para los que escriben
+  código del extractor (`reparacion`, `expansion-codigo`), Sonnet 5.5 para
+  los que leen y comparan contra el PDF; `AGENTE_MODELO` lo cambia.
 - `scripts/impacto.py` — registro de correcciones confirmadas
   (`verificaciones/impacto/*.jsonl`: documento, artículo, sha256 del PDF y del
   texto antes y después, veredicto), su exigencia sobre los commits de una
