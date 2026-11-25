@@ -186,8 +186,9 @@ CPEUM = PerfilFuente(
     page_footer_re=re.compile(r"^\d{1,4}\s+de\s+\d{3,4}$"),
     fechas_de=fechas_dof,
     reform_note_start_re=re.compile(
-        r"^(?:Párrafo|Fracción|Inciso|Apartado|Artículo|Reforma|Adicion|"
-        r"Reformad|Recorrid|Denominación|Fe de|Adicionad)\b.*DOF\s+\d{2}-\d{2}-\d{4}"),
+        r"^(?:Párrafo|Fracción|Inciso|Apartado|Artículo|Base|Numeral|Encabezado|"
+        r"Reforma|Denominación|Fe de|(?:Reformad|Adicionad|Derogad|Recorrid)[oa]s?)\b"
+        r".*DOF\s+\d{2}-\d{2}-\d{4}"),
     n_articulos=136,
     leak_markers=("CÁMARA DE DIPUTADOS", "Secretaría de Servicios"),
     leak_re=re.compile(r"\b\d{1,3} de \d{3}\b"),
